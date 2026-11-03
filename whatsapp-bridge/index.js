@@ -95,7 +95,11 @@ if (process.env.PUPPETEER_EXECUTABLE_PATH) {
 // archives WhatsApp Web's HTML per build; {version} is substituted by the
 // library. Bump WA_WEB_VERSION when linking starts failing again:
 //   https://github.com/wppconnect-team/wa-version/tree/main/html
-const WA_WEB_VERSION = process.env.WA_WEB_VERSION || "2.3000.1047561935-alpha";
+// Bumped 2026-11-03: the previous pin was ~5.3 million builds behind, and
+// WhatsApp refuses to link a NEW device on a stale build while existing
+// sessions keep working. The symptom was requestPairingCode() failing outright
+// ("Could not request a pairing code"), then a QR that nothing would accept.
+const WA_WEB_VERSION = process.env.WA_WEB_VERSION || "2.3000.1052866173-alpha";
 
 const client = new Client({
   authStrategy: new LocalAuth(),
