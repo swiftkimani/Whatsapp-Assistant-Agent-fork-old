@@ -1,5 +1,5 @@
 # CONTEXT — WhatsApp Assistant Agent
-_Last updated: 2026-11-01_
+_Last updated: 2026-11-03_
 
 ## Current goal
 Get the system running on this machine, with replies coming from the Claude API
@@ -12,12 +12,12 @@ instead of OpenAI.
 | Bridge deps | ✅ | installed with `PUPPETEER_SKIP_DOWNLOAD=true`, uses system Chrome |
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
-| Test suite | ✅ | 175 pytest + 41 `node --test` pass, 0 fail |
+| Test suite | ✅ | 180 pytest + 46 `node --test` pass, 0 fail |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
 | WhatsApp linked | ✅ | linked on the server; survives redeploys with no QR |
-| Who gets answered | ✅ | `ALLOWED_CONTACTS=contacts`; per-contact modes on the dashboard |
+| Who gets answered | ✅ | `ALLOWED_CONTACTS=anyone`; unchosen senders reply automatically |
 | Replies going out | ⬜ | **the notes are still empty — this is the one blocker** |
 
 ## Done
@@ -61,9 +61,9 @@ happens until the first one is done.
    set's five misses are holds.
 2. Replace the placeholder lines in **style examples** with real messages, so
    the voice is the owner's rather than an impression of it.
-3. Pick people on the **Contacts** tab. The default is "leave alone", so until
-   someone is set to "ask me first" or "reply automatically", nothing is
-   transcribed, stored or sent to a model.
+3. ~~Pick people on the **Contacts** tab.~~ Superseded: the assistant now
+   answers anyone (see *Done — answering anyone*). Per-person modes still
+   override it, so this is where to put someone back on "ask me first".
 4. Watch the held queue for a while, then turn **auto-reply** on when the
    drafts read right. Deliberately still paused.
 5. Re-run `python -m evals.run_eval` once the notes are filled — the five
@@ -312,6 +312,43 @@ a default that is no longer `auto`, choosing "reply automatically" for one
 person was silently discarded — the one choice that matters. It compares against the
 current default instead.
 
+## Done — answering anyone (2026-11-03)
+Asked for directly: it should respond to anyone, not only to a saved contact
+who has been picked. Three switches stood in the way and only two were moved.
+
+- **`ALLOWED_CONTACTS=anyone`** — a new keyword in both copies of the rules
+  (`whatsapp-bridge/allowlist.js`, `app.main.is_allowed`). An empty list
+  already meant everyone, but by accident: it is what you get by forgetting,
+  and `docker-compose.yaml` holds the variable as `${VAR:?}` precisely so
+  forgetting cannot deploy. `anyone` says the same thing on purpose, survives
+  compose, and reads as a decision in the audit of the file.
+  - It makes the address book irrelevant, so it is not read — a broken
+    `contacts.json` can no longer fail closed over a list that has stopped
+    deciding anything.
+  - An `@lid` privacy id is still resolved to a number, because that is what
+    lets the backend recognise a saved contact and honour the mode set for
+    them. But resolution no longer decides the outcome, so a failure now costs
+    that name rather than the reply.
+  - Groups are untouched: `ALLOW_GROUPS=false` still refuses them as
+    `groups_off`, which was the answer to the question when it was asked.
+- **Default contact mode `auto`** — set on the Contacts tab ("Anyone not
+  chosen"). This is the switch that actually answers a stranger: someone never
+  saved has no mode of their own, so they get the default, and the default was
+  `ignore`. The allowlist alone would have let everybody reach an assistant
+  that replies to nobody.
+- **`auto_reply` is still off**, deliberately, and is the owner's to turn on
+  (*Next*, item 4). Until then every one of these replies is written and held
+  rather than sent. On the server it is a different database and came up *on*
+  — see *Deployment traps*, trap 2.
+
+A drop by contact mode now writes one `ignored` log line (no text, hashed chat
+id). It was the only gate that could silently answer nobody, and the
+combination that does it looks live from every screen.
+
+8 new tests across the two suites, including the end-to-end one the change is
+really about: a sender in no list and under no name reaches the agent, gets a
+reply, and is filed under their number.
+
 ## Done — knowing which replies were not yours (2026-10-31)
 "How do I know on my phone that the text is AI generated?" has a hard
 constraint behind it: WhatsApp renders the same bytes at both ends, so a
@@ -349,7 +386,8 @@ dashboard*.
 - `ALLOWED_CONTACTS` is a `${VAR:?}` field in `docker-compose.yaml`, so Coolify
   refuses to deploy until it has a value. An empty allowlist means every sender
   is processed, and that should not be reachable by forgetting to type
-  something. `BRIDGE_API_TOKEN` goes the other way: it is
+  something. `anyone` is the value that means it deliberately, and is what is
+  set now. `BRIDGE_API_TOKEN` goes the other way: it is
   `${SERVICE_PASSWORD_64_BRIDGE}`, which Coolify generates once and hands to
   both services, so no human picks or copies it.
 - The backend image installs the CPU torch wheel from PyTorch's own index. The
