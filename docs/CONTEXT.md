@@ -12,7 +12,8 @@ instead of OpenAI.
 | Bridge deps | ✅ | installed with `PUPPETEER_SKIP_DOWNLOAD=true`, uses system Chrome |
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
-| Test suite | ✅ | 180 pytest + 46 `node --test` pass, 0 fail |
+| Test suite | ✅ | 218 pytest + 54 `node --test` pass, 0 fail |
+| Dashboard UI | ✅ | rebuilt on design tokens; **not deployed yet** |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
@@ -349,6 +350,48 @@ combination that does it looks live from every screen.
 really about: a sender in no list and under no name reaches the agent, gets a
 reply, and is filed under their number.
 
+## The dashboard rebuilt (2026-11-03)
+Committed and pushed, **not deployed** — the server still serves the previous
+build, which is why the width still jumps there between tabs.
+
+- **Design tokens.** Five accent colours wired one per tab, an
+  indigo-violet-pink gradient on the logo, the h1 text, every primary button
+  and every outgoing bubble, three radial glow blobs behind the page, a conic
+  gradient under a 40px blur spinning in the orb, and a hue generated per
+  contact. Spacing ran 7/9/10/11/13/14/15/18px freehand. Replaced with a 4-pt
+  scale, a type scale, three radii, two elevations, three durations, one
+  easing, and colour *roles* with one green accent. Contrast measured: muted
+  text 5.9:1, primary on white 5.4:1, danger 6.5:1, warning 5.1:1.
+- **One width for every tab.** `#app[data-split="on"]` widened the shell only
+  while Chat and WhatsApp were paired, so the page resized as you changed tabs
+  — 780px on the other five, 1240px on those two. Now one width throughout;
+  only prose and form fields are capped.
+- **Phones.** Verified at 360 and 390px in real viewports, no horizontal
+  overflow. The tab strip was clipping its last tab, because the selected tab
+  keeps its label and equal flex shares then overflowed; it scrolls now and
+  scrolls the selection back into view.
+- **Media.** `wa_read.js` only ever produced a label. The bridge gained
+  `/media` and `/avatar`; photos, stickers, video and voice notes render in
+  the thread, documents are offered as downloads, and view-once waits behind a
+  button because opening one tells the sender and cannot be undone. Profile
+  photos are fetched by the backend, so the browser never talks to WhatsApp
+  and the CDN url never reaches the page.
+- **Choosing answered chats from the conversation**, which is also what puts
+  someone on `contacts.json` — the pane lists people who were never saved on
+  the phone, and a per-person setting needs a name to hang on.
+
+Two bugs found while building it, each with a test that fails without the fix:
+
+- `set_mode()` stored a row only when the choice differed from the current
+  default, which cannot tell "I chose this" from "I never decided". With the
+  default on `auto` that meant choosing someone stored nothing at all, and a
+  later change to the default silently moved people chosen deliberately.
+- `_same_number()` compared by suffix. A national number keeps the trunk zero
+  in some countries and replaces the country code with it in others, so
+  `254712345678` and `0712345678` — one Kenyan line — did not match, and
+  `name_for()` returning nothing dropped that person onto the default mode.
+  All three copies of the comparison now use the last 9 digits.
+
 ## Deployed, and the link that was not there (2026-11-03)
 `anyone` is live on the server (deployment `c41e36b`, 11m37s, finished
 14:41 UTC). Set there, and verified by reloading the page rather than by
@@ -459,10 +502,6 @@ Any setting stored in `data/assistant.db` — the kill switch, direct send,
 per-contact modes — has to be set again per deployment.
 
 ## Known issues / deferred
-- **`USER_NAME` is still `Shahd`** in `.env`, inherited from the original
-  project. The assistant replies *as* this person and treats a bare mention of
-  the name as someone calling for attention, so it must be set to the real
-  owner's name before going live. Left rather than guessed.
 - Whisper handles Kenyan English better than Kiswahili and heavy Sheng worse
   than either, so deep-slang voice notes are the least reliable input.
 - `looks_swahili()` is a word list. A Swahili message containing none of its
