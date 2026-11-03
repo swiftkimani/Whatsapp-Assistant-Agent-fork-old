@@ -276,6 +276,28 @@ async def contacts():
     return {"contacts": _contact_names()}
 
 
+class NewContactRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    number: str = Field(min_length=1, max_length=40)
+
+
+@router.post("/api/contacts", dependencies=[Depends(require_auth)])
+async def add_contact(body: NewContactRequest):
+    """Put one person on the list by hand.
+
+    Until this existed, the only way in was a full sync of the phone's address
+    book, so someone who had written to you but was never saved on the phone
+    could not be given a setting of their own at all. Adding only ever adds,
+    exactly as the sync does.
+    """
+    try:
+        name = contacts_store.add(body.name, body.number)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    log_event("contact_added")   # no name or number in logs
+    return {"name": name, "contacts": _contact_names()}
+
+
 @router.post("/api/contacts/sync", dependencies=[Depends(require_auth)])
 async def sync_contacts():
     """Copy the phone's own address book into contacts.json.
