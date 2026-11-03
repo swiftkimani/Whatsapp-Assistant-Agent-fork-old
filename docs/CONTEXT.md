@@ -17,7 +17,7 @@ instead of OpenAI.
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
-| WhatsApp linked | ❌ | **the session is gone** — the bridge is printing pairing codes (2026-11-03) |
+| WhatsApp linked | ❌ | server unlinked and **cannot link itself**; the valid session is on the laptop (2026-11-03) |
 | Who gets answered | ✅ | `ALLOWED_CONTACTS=anyone` live on the server; unchosen senders reply automatically |
 | Replies going out | ⬜ | **the notes are still empty — this is the one blocker** |
 
@@ -349,6 +349,40 @@ combination that does it looks live from every screen.
 8 new tests across the two suites, including the end-to-end one the change is
 really about: a sender in no list and under no name reaches the agent, gets a
 reply, and is filed under their number.
+
+## Why the server cannot re-link, and where the live session actually is (2026-11-03)
+Three things were learned by testing rather than reasoning, and they change the
+procedure under *Done — linking*.
+
+**The laptop's session is still valid.** Starting the bridge here came up with
+`WhatsApp bridge is ready ... linked=a8ad873f` and immediately received live
+messages. Nothing needs re-linking: the working credential exists, it is just
+on the wrong machine (`.wwebjs_auth/session`, ~105 MB).
+
+**The stale version pin was real but was not the whole cause.** It is fixed and
+deployed — the bridge now logs `2.3000.1052866173-alpha` — and
+`requestPairingCode()` *still* fails with the same `Could not request a pairing
+code: t`. So a current build is necessary and not sufficient: the passkey gate
+is the remaining blocker, and the server cannot link itself at all. Pairing
+codes did work briefly earlier in the day on the old pin, which is consistent
+with WhatsApp tightening on stale builds rather than with the pin alone.
+
+**Never run the bridge in two places.** The server copy and the laptop copy are
+the same device identity, and WhatsApp keeps one connection per identity, so
+whichever connects last takes the link and the other is left unauthenticated.
+That is the most likely explanation for the session "dying" on the server, and
+it means the transplant is one-way: once it is on the server, do not start the
+bridge locally again.
+
+`WA_WEB_VERSION` cannot be set from Coolify. It is a compose-managed variable
+(`${WA_WEB_VERSION:-}`), and Coolify discards any value typed into it — the
+dialog even renders two Value inputs, one visible and one hidden. The pin is
+only changeable in `whatsapp-bridge/index.js`, which is where it now lives.
+
+The transplant needs host access: the Coolify terminal, ssh and packaging the
+session are all outside what the agent may do, and compose volume mounts are
+read-only in Coolify's storage panel. It is the owner's to run; the commands
+are in the session notes and follow *Done — linking*.
 
 ## The dashboard rebuilt (2026-11-03)
 Live on the server as deployment `98ce06d`. Verified there rather than only
