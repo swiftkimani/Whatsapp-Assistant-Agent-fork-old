@@ -336,7 +336,7 @@
     </div>
     <form id="composer">
       <input id="text" dir="auto" placeholder="Message your assistant…" aria-label="Instruction" autocomplete="off">
-      <button id="lang" type="button" aria-label="Dictation language: automatic" title="Dictation language: AUTO hears Arabic or English">AUTO</button>
+      <button id="lang" type="button" aria-label="Dictation language: automatic" title="Dictation language: AUTO hears Kiswahili or English">AUTO</button>
       <button id="mic" class="round" type="button" aria-label="Dictate" title="Dictate"></button>
       <button id="send" class="round go" type="submit" aria-label="Send to assistant" title="Ask">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -633,9 +633,9 @@
   }
   // ---- the orb: appears while you talk to the assistant ----
   const orbWrap = $("orbWrap"), orbEl = $("orb"), orbLabel = $("orbLabel"), orbCaption = $("orbCaption"), orbClose = $("orbClose");
-  const ORB_TEXT = { listening: ["Listening…", "بسمعك…"], thinking: ["Thinking…", "بفكر…"], speaking: ["Speaking…", "بتكلم…"] };
+  const ORB_TEXT = { listening: ["Listening…", "Nakusikiliza…"], thinking: ["Thinking…", "Nafikiria…"], speaking: ["Speaking…", "Naongea…"] };
   const ORB_BUTTON = { listening: "Done", thinking: "Hide", speaking: "Stop" };
-  let orbState = "off", orbLevel = 0, orbTarget = 0, orbRaf = 0, orbDismissed = false, orbAr = false, orbMeter = false, voiceAn = null;
+  let orbState = "off", orbLevel = 0, orbTarget = 0, orbRaf = 0, orbDismissed = false, orbSw = false, orbMeter = false, voiceAn = null;
 
   function setOrb(state, caption) {
     if (state !== "off" && orbDismissed) return;
@@ -643,7 +643,7 @@
     orbWrap.classList.toggle("on", state !== "off");
     orbWrap.dataset.state = state;
     if (state === "off") return;
-    orbLabel.textContent = ORB_TEXT[state][orbAr ? 1 : 0];
+    orbLabel.textContent = ORB_TEXT[state][orbSw ? 1 : 0];
     orbClose.textContent = ORB_BUTTON[state];
     if (caption !== undefined) orbCaption.textContent = caption;
     if (!orbRaf) orbRaf = requestAnimationFrame(orbTick);
@@ -736,19 +736,25 @@
   document.addEventListener("pointerdown", unlockAudio, { once: true });   // one tap anywhere allows sound
 
   // What gets read aloud for a list of messages: who it's from, then what they said. No model involved.
-  const isArabicText = (t) => /[\u0600-\u06FF]/.test(t);
-  function messageScript(items, intro, arabic) {
+  // English and Kiswahili share the Latin alphabet, so they cannot be told
+  // apart by characters the way Arabic and English could. This mirrors the
+  // word list in app/lang.py, including its bias: short ambiguous words are
+  // left out, because missing Swahili costs an accent while misreading
+  // English costs intelligibility.
+  const SWAHILI_WORDS = /\b(niaje|vipi|mambo|habari|sasa|sawa|poa|fiti|manze|buda|wacha|pole|asante|karibu|ndio|ndiyo|hapana|tafadhali|leo|jana|kesho|wapi|nani|lini|nini|tuma|ujumbe|jumbe|meseji|nipigie|nitakuambia|nimeshika|uko|niko|yako|yangu|kwako|rafiki|nakuja|tuonane|baadaye|kwanza|bado|haraka|nimechelewa|sijui|utakuja|unaenda|umefika|twende|asubuhi|jioni)\b/i;
+  const looksSwahili = (t) => SWAHILI_WORDS.test(t || "");
+  function messageScript(items, intro, swahili) {
     const MAX = 8;                                                     // items come newest first
     const shown = items.slice(0, MAX).reverse(), rest = items.length - shown.length;   // read the newest ones, oldest of those first
     const single = new Set(items.map((m) => m.name)).size === 1;
     const parts = [intro.replace(/[:：]\s*$/, "")];
     for (const m of shown) {
       const out = m.direction === "out";
-      const body = /^\[Image received\]/.test(m.body) ? (arabic ? "بعتلك صورة" : "sent a photo") : m.body;
-      parts.push(out ? `${arabic ? "انتي لـ " : "You to "}${m.name}: ${body}`
+      const body = /^\[Image received\]/.test(m.body) ? (swahili ? "alituma picha" : "sent a photo") : m.body;
+      parts.push(out ? `${swahili ? "Wewe kwa " : "You to "}${m.name}: ${body}`
                      : single ? body : `${m.name}: ${body}`);
     }
-    if (rest > 0) parts.push(arabic ? `وفي ${rest} رسايل أقدم على الشاشة` : `and ${rest} earlier ones on screen`);
+    if (rest > 0) parts.push(swahili ? `na jumbe ${rest} za zamani kwenye skrini` : `and ${rest} earlier ones on screen`);
     return parts;
   }
 
@@ -758,16 +764,11 @@
   const ASSISTANT_NAME = "Arianna";
   // Full name and the short form she also goes by, longest first so WAKE_LEAD
   // strips the whole name and not just its first syllable.
-  // Latin forms get ASCII word boundaries. Arabic forms need an explicit
-  // Arabic-letter boundary instead: JS \b is defined on [A-Za-z0-9_], so it
-  // never matches beside an Arabic letter, and without the boundary the short
-  // form collides with ordinary words — "أريد" ("I want") contains "أري".
+  // Kiswahili and Sheng are written in the Latin alphabet, so ordinary word
+  // boundaries are enough and the Arabic spellings this once carried are gone.
   const WAKE_LATIN = "arianna|ariana|aryanna|aryana|ariyanna|ariyana|arie|aree|ari";
-  const WAKE_ARABIC = "أريانا|اريانا|آريانا|أريانة|اريانة|آريه|أريه|آري|أري|اري";
-  const WAKE = new RegExp(
-    "\\b(?:" + WAKE_LATIN + ")\\b"
-    + "|(?<![\\u0600-\\u06FF])(?:" + WAKE_ARABIC + ")(?![\\u0600-\\u06FF])", "i");
-  const WAKE_LEAD = new RegExp("^[\\s,،.:!؟?-]*(?:" + WAKE.source + ")[\\s,،.:!؟?-]*", "i");
+  const WAKE = new RegExp("\\b(?:" + WAKE_LATIN + ")\\b", "i");
+  const WAKE_LEAD = new RegExp("^[\\s,.:!?-]*(?:" + WAKE.source + ")[\\s,.:!?-]*", "i");
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const wakeBtn = $("wakeBtn");
   let wakeOn = false, wakeRec = null, wakeHolds = 0, wakeDelay = 400, beepCtx = null;
@@ -812,8 +813,8 @@
   function holdWake() { wakeHolds++; stopWake(); }
   function releaseWake() { wakeHolds = Math.max(0, wakeHolds - 1); if (wakeHolds === 0) setTimeout(startWake, 300); }
 
-  // The browser's Arabic recognizer would turn English into Arabic letters, so it only listens for the name.
-  // The question itself is recorded and transcribed by Whisper, which handles Arabic and English.
+  // The browser's recognizer only listens for the name. The question itself is
+  // recorded and transcribed by Whisper, which handles Kiswahili and English.
   function onWake() {
     holdWake();
     stopSpeech();
@@ -834,7 +835,7 @@
     unlockAudio();
     if (!wakeOn && !voiceChat) { voiceChat = true; renderVoiceChip(); }
     setWake(!wakeOn);
-    if (wakeOn) bubble("bot", `Hands-free is on. Say "${ASSISTANT_NAME}", then your question (Arabic or English). You can pause after the name, or go straight on. Keep this tab open. Messages you ask me to send go out right away, and I read back what I sent.`);
+    if (wakeOn) bubble("bot", `Hands-free is on. Say "${ASSISTANT_NAME}", then your question (Kiswahili or English). You can pause after the name, or go straight on. Keep this tab open. Messages you ask me to send go out right away, and I read back what I sent.`);
     else bubble("bot", "Hands-free is off.");
   };
 
@@ -863,8 +864,13 @@
   }
 
   function renderSuggestions() {
-    const who = contactNames[0] || "Mom";
-    const ideas = ["Who messaged me today?", `Show what ${who} sent today`, `Tell ${who} I'll be late`];
+    // Only suggest messaging somebody once there is somebody to message.
+    // A fixed name here was a leftover from the project this was forked from,
+    // and it offered to text a person who does not exist.
+    const who = contactNames[0];
+    const ideas = who
+      ? ["Who messaged me today?", `Show what ${who} sent today`, `Tell ${who} I'll be late`]
+      : ["Who messaged me today?", "What did I miss today?", "Show yesterday's messages"];
     $("suggest").replaceChildren(...ideas.map((t) => {
       const b = btn(t, "");
       b.onclick = () => { box.value = t; box.focus(); };   // fills the box only: you decide when to run it
@@ -902,17 +908,17 @@
   const failText = (err) => (err.code === 1 ? "Location permission was denied." : err.message);
 
   // Direct send: the server only proposes; the page performs it through the same validated routes.
-  async function autoSend(host, action, readBack) {   // readBack: "ar" | "en" | undefined (spoken requests get read back)
+  async function autoSend(host, action, readBack) {   // readBack: "sw" | "en" | undefined (spoken requests get read back)
     try {
       await doSend(action);
       say(host, action.type === "text" ? `Sent to ${action.contact}:\n${action.text}` : `Location sent to ${action.contact}.`);
       if (readBack) speakMany(action.type === "text"
-        ? [readBack === "ar" ? `الرسالة اتبعتت لـ ${action.contact}` : `Sent to ${action.contact}`, action.text]
-        : [readBack === "ar" ? `موقعك اتبعت لـ ${action.contact}` : `Location sent to ${action.contact}`], true);
+        ? [readBack === "sw" ? `Imetumwa kwa ${action.contact}` : `Sent to ${action.contact}`, action.text]
+        : [readBack === "sw" ? `Mahali pametumwa kwa ${action.contact}` : `Location sent to ${action.contact}`], true);
     } catch (err) {
       say(host, `Couldn't send: ${failText(err)}\nReview it and press Send to retry.`, true);
       showProposal(host, action);
-      if (readBack) speakMany([readBack === "ar" ? "معرفتش ابعت. راجعي الرسالة على الشاشة" : "I couldn't send it. Check the message on screen."], true);
+      if (readBack) speakMany([readBack === "sw" ? "Sikuweza kutuma. Angalia ujumbe kwenye skrini." : "I couldn't send it. Check the message on screen."], true);
     }
   }
 
@@ -1481,9 +1487,9 @@
   let lang = "auto", recorder = null, stopTimer = null;
 
   langBtn.onclick = () => {
-    lang = { auto: "ar", ar: "en", en: "auto" }[lang];
+    lang = { auto: "sw", sw: "en", en: "auto" }[lang];
     langBtn.textContent = lang.toUpperCase();
-    langBtn.setAttribute("aria-label", `Dictation language: ${{ auto: "automatic", ar: "Arabic", en: "English" }[lang]}`);
+    langBtn.setAttribute("aria-label", `Dictation language: ${{ auto: "automatic", sw: "Kiswahili", en: "English" }[lang]}`);
   };
   function setMic(state) {
     micBtn.disabled = state === "busy";
@@ -1560,7 +1566,7 @@
       finally { setMic("idle"); }
       if (auto) text = text.replace(WAKE_LEAD, "").trim();           // drop the name if the recording caught it
       if (text) {
-        if (voiceChat || auto) { orbAr = isArabicText(text); setOrb("thinking", text); await ask(text, true); }   // spoken in, spoken out
+        if (voiceChat || auto) { orbSw = looksSwahili(text); setOrb("thinking", text); await ask(text, true); }   // spoken in, spoken out
         else { box.value = (box.value + " " + text).trim(); box.focus(); }
       } else setOrb("off");
       onDone();
@@ -1568,7 +1574,7 @@
     recorder.start();
     setMic("rec");
     stopTimer = setTimeout(() => recorder && recorder.stop(), 60000);   // 60 s cap
-    if (showOrb) { orbDismissed = false; orbAr = false; orbMeter = false; setOrb("listening", ""); }
+    if (showOrb) { orbDismissed = false; orbSw = false; orbMeter = false; setOrb("listening", ""); }
     if (auto || showOrb) stopWatch = watchSilence(
       stream,
       auto ? (gaveUp) => { discard = gaveUp; if (recorder) recorder.stop(); } : null,
@@ -1587,13 +1593,13 @@
     const reply = thinking();
     try {
       const r = await api("/api/assistant", { message: text, history: history.slice(-8) });
-      const a = r.action, arabic = isArabicText(text);
+      const a = r.action, swahili = looksSwahili(text);
       const direct = !!(a && a.auto);                    // follows the Direct send switch, spoken or typed
       const readBack = direct && viaVoice && voiceChat;  // after a spoken send, the result is read back
       const replyText = r.reply || "";
       say(reply, replyText);
       // For a list of messages the voice reads them out: who they're from, then what they said.
-      const parts = a && a.type === "messages" ? messageScript(a.items, replyText, arabic) : [replyText];
+      const parts = a && a.type === "messages" ? messageScript(a.items, replyText, swahili) : [replyText];
       if (replyText) addListen(reply, parts);
       if (viaVoice && voiceChat && !readBack) speakMany(parts, true);
       else if (viaVoice && !readBack) setOrb("off");
@@ -1603,7 +1609,7 @@
       history.push({ role: "user", content: text }, { role: "assistant", content: replyText + noteText });
       if (!a) return;
       if (a.type === "messages") reply.append(renderMessages(a.items));
-      else if (direct) autoSend(reply, a, readBack ? (arabic ? "ar" : "en") : undefined);
+      else if (direct) autoSend(reply, a, readBack ? (swahili ? "sw" : "en") : undefined);
       else showProposal(reply, a);
       log.scrollTop = log.scrollHeight;
     } catch (err) {
