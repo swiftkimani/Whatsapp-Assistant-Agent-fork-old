@@ -16,8 +16,8 @@ instead of OpenAI.
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
-| WhatsApp linked | ✅ | linked on the server; survives redeploys with no QR |
-| Who gets answered | ✅ | `ALLOWED_CONTACTS=anyone`; unchosen senders reply automatically |
+| WhatsApp linked | ❌ | **the session is gone** — the bridge is printing pairing codes (2026-11-03) |
+| Who gets answered | ✅ | `ALLOWED_CONTACTS=anyone` live on the server; unchosen senders reply automatically |
 | Replies going out | ⬜ | **the notes are still empty — this is the one blocker** |
 
 ## Done
@@ -348,6 +348,39 @@ combination that does it looks live from every screen.
 8 new tests across the two suites, including the end-to-end one the change is
 really about: a sender in no list and under no name reaches the agent, gets a
 reply, and is filed under their number.
+
+## Deployed, and the link that was not there (2026-11-03)
+`anyone` is live on the server (deployment `c41e36b`, 11m37s, finished
+14:41 UTC). Set there, and verified by reloading the page rather than by
+trusting the control:
+
+- Coolify `ALLOWED_CONTACTS`: was `contacts`, now `anyone`. `ALLOW_GROUPS`
+  confirmed `false`.
+- Dashboard "Anyone not chosen": was **Leave alone**, now **Reply
+  automatically**. This lives in `data/assistant.db` on the volume, so it did
+  not travel with the code — it is the per-deployment setting trap again.
+- `auto_reply` on the server is **On**, as trap 2 predicted. Combined with the
+  two above, a stranger's reply now goes out without a step from the owner.
+
+**The bridge has no WhatsApp session.** It boots, clears its stale Chromium
+locks as designed, and then prints a fresh `PAIRING CODE` every few minutes —
+so the account is unlinked and *nothing reaches the assistant at all*. The
+backend is healthy and answers 502 on `/api/wa/*` and `/api/contacts/sync`
+because of it. Whether the link died before this redeploy or during it is not
+visible from these logs: the volume itself survived (the "cleared 3 stale
+Chromium lock file(s) from a previous container" line proves the profile is
+still there), so what is gone is the credential inside it, not the directory.
+
+Consequences, until it is re-linked:
+- No message can arrive, so "answers anyone" is configured but inert.
+- `contacts.json` on the server is **empty** — the sync has never succeeded
+  there — so no one can be pinned to a mode of their own yet. Pinning Kawira
+  specifically needs the sync, which needs the bridge.
+
+Re-linking is the documented procedure under *Done — linking*. Note
+`WA_WEB_VERSION` is pinned at `2.3000.1047561935-alpha`; if linking reports
+"Couldn't link device", that pin has gone stale again and is the first thing
+to bump.
 
 ## Done — knowing which replies were not yours (2026-10-31)
 "How do I know on my phone that the text is AI generated?" has a hard
