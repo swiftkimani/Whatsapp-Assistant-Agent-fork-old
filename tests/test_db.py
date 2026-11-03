@@ -28,7 +28,9 @@ def test_contact_modes(fresh_db):
     fresh_db.set_mode("Mom", "auto")
     assert fresh_db.get_mode("mom") == "auto"          # case-insensitive
     fresh_db.set_mode("Mom", "ignore")
-    assert fresh_db.all_modes() == {}                  # back to the default: no row kept
+    assert fresh_db.all_modes() == {"mom": "ignore"}   # the choice is kept, whatever it is
+    fresh_db.clear_mode("Mom")
+    assert fresh_db.all_modes() == {}                  # only clearing it follows the default again
 
 
 def test_changing_the_default_moves_everyone_not_decided_about(fresh_db):
@@ -39,14 +41,17 @@ def test_changing_the_default_moves_everyone_not_decided_about(fresh_db):
     assert fresh_db.get_mode("Mom") == "auto"
 
 
-def test_a_choice_matching_the_new_default_stops_being_stored(fresh_db):
-    """The row exists to record a difference. Once it is not a difference, it
-    goes — otherwise changing the default would leave stale rows behind."""
-    fresh_db.set_mode("Mom", "auto")
-    assert fresh_db.all_modes() == {"mom": "auto"}
+def test_a_choice_survives_the_default_moving_onto_it_and_away_again(fresh_db):
+    """A row records that a choice was made, not merely that it differed from
+    the default at the time. Deleting it when the two happened to agree could
+    not tell "I chose this" from "I never decided", so the next change to the
+    default silently moved people who had been chosen deliberately."""
     fresh_db.set_default_mode("auto")
-    fresh_db.set_mode("Mom", "auto")
-    assert fresh_db.all_modes() == {}
+    fresh_db.set_mode("Kawira", "auto")                 # chosen while it matches
+    assert fresh_db.all_modes() == {"kawira": "auto"}
+    fresh_db.set_default_mode("ignore")                 # everyone else is dropped
+    assert fresh_db.get_mode("Kawira") == "auto"        # she is not
+    assert fresh_db.get_mode("Someone else") == "ignore"
 
 
 def test_an_unknown_default_falls_back_to_holding(fresh_db):

@@ -49,13 +49,27 @@ def test_reading_your_whatsapp_needs_the_password(client, method, path):
 
 def test_chats_come_back_as_the_bridge_shaped_them(signed_in, bridge):
     r = signed_in.get("/api/wa/chats")
-    assert r.status_code == 200 and r.json() == CHATS
+    assert r.status_code == 200
+    got = r.json()["chats"][0]
+    # Everything the bridge said survives untouched; the assistant state is
+    # added beside it rather than folded into it.
+    assert {k: got[k] for k in CHATS["chats"][0]} == CHATS["chats"][0]
     assert bridge.calls[0] == {"path": "/chats", "payload": {"limit": 25}}
+
+
+def test_each_chat_says_what_the_assistant_will_do_with_it(signed_in, bridge):
+    got = signed_in.get("/api/wa/chats").json()
+    assert got["default_mode"] == "ignore"
+    # Nobody on the contact list, so this chat is taking the default and has
+    # not been chosen — a distinction the pane has to be able to draw.
+    assert got["chats"][0]["assistant"] == {
+        "name": None, "mode": "ignore", "auto": False, "chosen": False, "can_choose": True}
 
 
 def test_a_thread_is_asked_for_by_chat_id(signed_in, bridge):
     r = signed_in.get("/api/wa/thread", params={"chat_id": "254712345678@c.us", "limit": 10})
-    assert r.status_code == 200 and r.json() == THREAD
+    assert r.status_code == 200
+    assert r.json()["messages"] == THREAD["messages"]
     assert bridge.calls[0]["payload"] == {"chat_id": "254712345678@c.us", "limit": 10}
 
 
@@ -144,3 +158,51 @@ def test_a_signed_out_browser_cannot_open_the_stream_and_leaves_nothing_behind(c
     live._subscribers.clear()
     assert client.get("/api/wa/stream").status_code == 401
     assert live.listeners() == 0
+
+
+# ---- choosing, from the conversation itself, who the assistant answers ----
+
+def test_choosing_a_chat_puts_that_person_on_the_list_and_sets_them_to_reply(signed_in, bridge):
+    """The point of doing it here: someone who has written to you but was never
+    saved on your phone has no name for a setting to hang on, and this is what
+    gives them one."""
+    r = signed_in.post("/api/wa/assistant",
+                       json={"chat_id": "254799000111@c.us", "name": "Kawira", "enabled": True})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Kawira"
+    assert r.json()["assistant"]["auto"] is True
+    assert signed_in.get("/api/contacts").json()["contacts"].count("Kawira") == 1
+
+
+def test_choosing_the_same_chat_twice_does_not_add_them_twice(signed_in, bridge):
+    body = {"chat_id": "254799000111@c.us", "name": "Kawira", "enabled": True}
+    signed_in.post("/api/wa/assistant", json=body)
+    signed_in.post("/api/wa/assistant", json=body)
+    assert signed_in.get("/api/contacts").json()["contacts"].count("Kawira") == 1
+
+
+def test_a_chosen_chat_stays_chosen_when_the_default_moves(signed_in, bridge, fresh_db):
+    """What "select the chats I want answered" has to mean: the choice is
+    recorded, not inferred from whatever the default happens to be today."""
+    fresh_db.set_default_mode("auto")
+    signed_in.post("/api/wa/assistant",
+                   json={"chat_id": "254799000111@c.us", "name": "Kawira", "enabled": True})
+    fresh_db.set_default_mode("ignore")
+    assert fresh_db.get_mode("Kawira") == "auto"
+
+
+def test_turning_it_off_holds_the_reply_rather_than_dropping_the_message(signed_in, bridge, fresh_db):
+    signed_in.post("/api/wa/assistant",
+                   json={"chat_id": "254799000111@c.us", "name": "Kawira", "enabled": False})
+    assert fresh_db.get_mode("Kawira") == "hold"
+
+
+def test_a_group_cannot_be_chosen_because_it_is_never_answered(signed_in, bridge):
+    r = signed_in.post("/api/wa/assistant",
+                       json={"chat_id": "254799000111@g.us", "name": "Team", "enabled": True})
+    assert r.status_code == 400 and "group" in r.json()["detail"]
+
+
+def test_choosing_needs_a_session(client, bridge):
+    r = client.post("/api/wa/assistant", json={"chat_id": "254799000111@c.us", "enabled": True})
+    assert r.status_code == 401

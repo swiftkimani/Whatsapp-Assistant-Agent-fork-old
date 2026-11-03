@@ -125,21 +125,26 @@ MODES = ("auto", "hold", "ignore")
 
 
 def set_mode(name: str, mode: str) -> None:
+    """Record a choice made about one person. Always stored, even when it
+    matches today's default.
+
+    It used to delete the row in that case, on the reasoning that a row is only
+    needed for a choice that differs. But that cannot tell "I chose this" from
+    "I never decided", so changing the default silently moved people who had
+    been chosen deliberately — and with the default on "reply automatically",
+    choosing someone stored nothing at all.
+    """
     if mode not in MODES:
         raise ValueError(f"bad mode: {mode}")
     with _db() as c:
-        # A row is only stored for a choice that differs from the default, so
-        # changing the default moves everyone you have not decided about. It
-        # used to compare against "auto" literally, which silently discarded
-        # the one choice that mattered once the default became "hold".
-        if mode == default_mode():
-            c.execute("DELETE FROM contact_modes WHERE name = ?", (name.strip().lower(),))
-        else:
-            c.execute("INSERT INTO contact_modes (name, mode) VALUES (?, ?) "
-                      "ON CONFLICT(name) DO UPDATE SET mode = excluded.mode", (name.strip().lower(), mode))
+        c.execute("INSERT INTO contact_modes (name, mode) VALUES (?, ?) "
+                  "ON CONFLICT(name) DO UPDATE SET mode = excluded.mode", (name.strip().lower(), mode))
 
 
-MODES = ("auto", "hold", "ignore")
+def clear_mode(name: str) -> None:
+    """Forget a choice, so this person follows the default again."""
+    with _db() as c:
+        c.execute("DELETE FROM contact_modes WHERE name = ?", (name.strip().lower(),))
 
 
 def default_mode() -> str:
