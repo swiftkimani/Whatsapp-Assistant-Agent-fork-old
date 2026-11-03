@@ -48,7 +48,10 @@
        color:var(--text);background:var(--bg);
        font:var(--f-md)/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   h1,h2{line-height:1.2}
+  /* One width for every tab. It used to widen only while Chat and WhatsApp
+     were side by side, so the whole page jumped as you moved between tabs. */
   #app{width:100%;max-width:780px;height:100%;display:flex;flex-direction:column;gap:var(--s3);padding:var(--s4)}
+  @media (min-width:1024px){ #app{max-width:1240px} }
   button,input,select,textarea{font:inherit;color:var(--text)}
   input,select,textarea{padding:var(--s2) var(--s3);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)}
   button{cursor:pointer}
@@ -69,6 +72,7 @@
   .chip.on{color:var(--success);border-color:var(--success)}
   .chip.warn{color:var(--danger);border-color:var(--danger)}
   .chip.plain::before{display:none}
+  .top #lockBtn{align-self:center}
 
   /* tabs */
   .tabs{display:flex;gap:var(--s1);padding:var(--s1);background:var(--surface);border:1px solid var(--border);
@@ -87,7 +91,10 @@
      Below the breakpoint the tabs pick one and the other is hidden. */
   .pair{flex:1;min-height:0;display:flex;gap:var(--s3)}
   .pair > .view{min-width:0}
-  @media (min-width:1024px){ #app[data-split="on"]{max-width:1240px} }
+  /* Rows stay full width; prose and form fields do not, because a line of
+     text 1200px wide is unreadable. */
+  #notesPanel textarea,#view-notes .note,#view-notes .noteh{max-width:72ch}
+  .addrow label{max-width:320px}
   .panel{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4);
          background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
   .note{margin:0;color:var(--text-muted);font-size:var(--f-sm)}
@@ -111,6 +118,12 @@
   .wa-kind{display:block;font-size:var(--f-xs);font-weight:600;color:var(--text-muted);margin-bottom:var(--s1)}
   .msg time{display:block;margin-top:var(--s1);font-size:var(--f-xs);color:var(--text-muted)}
   .me time{color:inherit;opacity:.75}
+  .waauto{display:flex;gap:var(--s2);align-items:center;font-size:var(--f-sm);color:var(--text-muted);
+          white-space:nowrap;cursor:pointer}
+  .waauto input{width:auto;padding:0;accent-color:var(--primary)}
+  .waauto.on{color:var(--primary)}
+  /* On the list, a chat the assistant answers says so in a word, not a colour. */
+  .wa-auto{font-size:var(--f-xs);font-weight:600;color:var(--primary);white-space:nowrap}
   .wa-draft{margin-top:var(--s3);border-inline-start:3px solid var(--warning)}
   .wa-draft .wa-kind{color:var(--warning)}
 
@@ -195,10 +208,11 @@
         color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
 
   /* media in a thread */
-  .media{margin-top:var(--s2);max-width:260px;border-radius:var(--r-sm);border:1px solid var(--border);display:block}
-  .media.sticker{max-width:128px;border:0;background:none}
-  .media audio{width:240px;max-width:100%}
-  .media video{max-width:100%;border-radius:var(--r-sm);display:block}
+  .media-slot{margin-top:var(--s2)}
+  .media-slot .note{color:inherit;opacity:.8}
+  img.media,video.media{max-width:260px;width:100%;border-radius:var(--r-sm);border:1px solid var(--border);display:block}
+  img.media.sticker{max-width:128px;border:0}
+  .media-slot audio{width:260px;max-width:100%;display:block}
   .reveal{display:inline-flex;align-items:center;gap:var(--s2);margin-top:var(--s2);padding:var(--s2) var(--s3);
           font-size:var(--f-sm);font-weight:500;border-radius:var(--r-sm);
           color:var(--text);background:var(--surface-raised);border:1px dashed var(--border)}
@@ -231,6 +245,40 @@
   .keep{display:flex;gap:var(--s2);align-items:center;color:var(--text-muted);font-size:var(--f-sm)}
   .keep input{width:auto;padding:0}
 
+  /* Phones: 360px up, no horizontal scrolling of the page itself. */
+  @media (max-width:560px){
+    #app{padding:var(--s2);gap:var(--s2)}
+    .top{gap:var(--s1) var(--s2)}
+    .brand small{display:none}
+    .logo{width:32px;height:32px}
+    h1{font-size:var(--f-md)}
+    /* Five switches and a sign-out ran to three rows at 360px. Smaller type
+       and tighter padding fit them in two without hiding any of them. */
+    .chip{font-size:var(--f-xs);padding:2px var(--s2);gap:var(--s1)}
+    .chips{gap:var(--s1)}
+    /* Sign out is not a switch, so on a phone it sits up on the title row
+       instead of costing the switches a line of their own. Placed explicitly:
+       auto-placement would follow DOM order and drop it below the chips. */
+    .top{display:grid;grid-template-columns:1fr auto;gap:var(--s1) var(--s2);align-items:center}
+    .brand{grid-column:1;grid-row:1}
+    #lockBtn{grid-column:2;grid-row:1;justify-self:end}
+    .chips{grid-column:1 / -1;grid-row:2}
+    /* Tabs scroll instead of squeezing: the selected one keeps its label, so
+       equal flex shares pushed the last tab off the edge and clipped it. */
+    .tabs{gap:0}
+    .tabs button{flex:none;min-width:44px;padding:var(--s2)}
+    .panel{padding:var(--s3);border-radius:var(--r-md)}
+    .msg{max-width:94%}
+    .addrow label{max-width:none;flex:1 1 100%}
+    /* A row of controls that cannot shrink any further goes to its own line
+       rather than pushing the page sideways. */
+    .addrow button{width:100%}
+    .filters select,.filters .defmode{width:100%}
+    .defmode select{flex:1;min-width:0}
+    img.media,video.media,.media-slot audio{max-width:100%}
+    .orb-stage{width:min(56vw,180px)}
+  }
+
   @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
 </style>
 </head>
@@ -262,8 +310,8 @@
       <button id="copyBtn" class="chip off" type="button" aria-pressed="false" title="Copy every reply she sends by herself into your own WhatsApp chat, so your phone shows what went out as you">Copy to me: Off</button>
       <button id="wakeBtn" class="chip off" type="button" aria-pressed="false" title="Say the name to talk hands-free. Uses the browser's speech service (Chrome or Edge) while this page is open.">Say Arianna: Off</button>
       <button id="voiceBtn" class="chip on" type="button" aria-pressed="true" title="When on, what you dictate is sent right away and I answer out loud">Voice chat: On</button>
-      <button id="lockBtn" class="chip plain" type="button">Sign out</button>
     </div>
+    <button id="lockBtn" class="chip plain" type="button">Sign out</button>
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
@@ -300,6 +348,10 @@
     <div class="filters">
       <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
       <strong id="waWho" class="wa-who" dir="auto">Your WhatsApp</strong>
+      <label id="waAutoWrap" class="waauto" hidden>
+        <input id="waAuto" type="checkbox">
+        <span id="waAutoLabel">Assistant replies</span>
+      </label>
       <button id="waRefresh" class="ghost" type="button">Refresh</button>
     </div>
     <div id="waPanel" class="panel" aria-live="polite"></div>
@@ -397,8 +449,16 @@
     if (text !== undefined) e.textContent = text;
     return e;
   };
-  function avatar(name) {
+  // The initial is drawn first and the photo replaces it only once it has
+  // actually loaded, so a chat with no photo — or someone whose privacy
+  // setting hides it from you — shows a letter rather than a broken image.
+  function avatar(name, chatId) {
     const a = el("div", "avatar", (String(name || "?").trim()[0] || "?").toUpperCase());
+    if (!chatId) return a;
+    const img = new Image();
+    img.alt = "";
+    img.onload = () => a.replaceChildren(img);
+    img.src = `/api/wa/avatar?chat_id=${encodeURIComponent(chatId)}`;
     return a;
   }
   const note = (text) => el("p", "note", text);
@@ -496,6 +556,9 @@
       $("view-" + v).hidden = split ? !PAIRED.includes(v) : v !== name;
       $("tab-" + v).setAttribute("aria-selected", String(v === name));
     }
+    // The strip scrolls on a phone, so the tab you just picked has to be
+    // brought back into view or it can end up off the edge you tapped from.
+    $("tab-" + name).scrollIntoView({ block: "nearest", inline: "nearest" });
     if (name === "held") refreshHeld(true);
     if (name === "messages") loadMessages();
     if (name === "activity") loadActivity();
@@ -1140,14 +1203,47 @@
     main.append(name, preview);
     const side = el("div", "wa-side");
     side.append(el("span", "wa-when", c.ts ? when(c.ts) : ""));
+    if (c.assistant && c.assistant.auto) side.append(el("span", "wa-auto", "Assistant replies"));
     if (c.unread) side.append(el("span", "badge", String(c.unread)));
-    row.append(avatar(c.name), main, side);
+    row.append(avatar(c.name, c.id), main, side);
     row.setAttribute("aria-current", String(c.id === waChat));
     row.onclick = () => openWa(c.id, c.name);
     return row;
   }
 
-  function waBubble(m) {
+  const mediaUrl = (chatId, msgId) =>
+    `/api/wa/media?chat_id=${encodeURIComponent(chatId)}&msg_id=${encodeURIComponent(msgId)}`;
+
+  /** The element that shows one attachment, or null if it has no bytes to show. */
+  function mediaElement(m, chatId) {
+    const src = mediaUrl(chatId, m.id);
+    if (m.render_as === "image" || m.render_as === "sticker") {
+      const img = el("img", `media ${m.render_as === "sticker" ? "sticker" : ""}`.trim());
+      // The label already says what it is, and WhatsApp gives no description
+      // of its own, so the alt text is the one honest thing available.
+      img.alt = m.kind || "Attachment";
+      img.loading = "lazy";
+      img.src = src;
+      return img;
+    }
+    if (m.render_as === "video") {
+      const video = el("video", "media");
+      video.controls = true;
+      video.preload = "metadata";
+      video.src = src;
+      return video;
+    }
+    if (m.render_as === "voice") {
+      const audio = el("audio");
+      audio.controls = true;
+      audio.preload = "none";
+      audio.src = src;
+      return audio;
+    }
+    return null;
+  }
+
+  function waBubble(m, chatId) {
     const bubble = el("div", `msg ${m.from_me ? "me" : "bot"}`);
     if (m.kind) bubble.append(el("strong", "wa-kind", m.kind));
     if (m.body) {
@@ -1157,11 +1253,78 @@
     } else if (!m.kind) {
       bubble.append(el("em", "", "(no text)"));
     }
+
+    if (m.has_media && chatId) {
+      const holder = el("div", "media-slot");
+      const show = () => {
+        const node = mediaElement(m, chatId);
+        if (!node) return;
+        node.onerror = () => holder.replaceChildren(note("That attachment is no longer on WhatsApp."));
+        holder.replaceChildren(node);
+      };
+      if (m.view_once) {
+        // Opening one of these is not reversible: WhatsApp shows the sender it
+        // was opened and it cannot be opened again. So it waits to be asked.
+        const ask = btn("View once — show it", "reveal");
+        ask.onclick = () => { ask.remove(); show(); };
+        holder.append(ask);
+      } else if (m.render_as) {
+        show();
+      } else {
+        // A document or a contact card: offered as a download rather than
+        // guessed at and rendered.
+        const link = el("a", "reveal", `Download ${(m.kind || "attachment").toLowerCase()}`);
+        link.href = mediaUrl(chatId, m.id);
+        link.download = "";
+        holder.append(link);
+      }
+      bubble.append(holder);
+    }
     const stamp = el("time", "", when(m.ts));
     stamp.dateTime = new Date(m.ts * 1000).toISOString();
     bubble.append(stamp);
     return bubble;
   }
+
+  // Choosing, from the conversation, whether the assistant answers it. This is
+  // also what puts the person on the contact list, so somebody who has written
+  // to you but was never saved on your phone can be chosen without being typed
+  // in by hand first.
+  let waAssistant = null;
+
+  function showAssistantToggle(chat, defaultMode) {
+    const wrap = $("waAutoWrap"), box = $("waAuto"), label = $("waAutoLabel");
+    const state = (chat && chat.assistant) || null;
+    waAssistant = state;
+    wrap.hidden = !state || !state.can_choose;
+    if (wrap.hidden) return;
+    box.checked = state.auto;
+    wrap.classList.toggle("on", state.auto);
+    // "Chosen" and "happens to match the default" look identical until the
+    // default changes, so the difference is spelled out rather than implied.
+    label.textContent = state.chosen
+      ? "Assistant replies"
+      : `Assistant replies (following the default: ${MODES[defaultMode] || defaultMode})`;
+  }
+
+  $("waAuto").onchange = async () => {
+    const box = $("waAuto");
+    if (!waChat) return;
+    box.disabled = true;
+    try {
+      const r = await api("/api/wa/assistant", {
+        chat_id: waChat, name: $("waWho").textContent.replace(/ · group$/, ""), enabled: box.checked,
+      });
+      waAssistant = r.assistant;
+      $("waAutoWrap").classList.toggle("on", r.assistant.auto);
+      $("waAutoLabel").textContent = r.assistant.auto
+        ? "Assistant replies" : "Assistant holds for you";
+      loadContacts();
+    } catch (err) {
+      box.checked = !box.checked;
+      bubble("bot", err.message, true);
+    } finally { box.disabled = false; }
+  };
 
   async function loadWaChats() {
     try {
@@ -1200,10 +1363,13 @@
     const wasAtBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
     const keep = panel.scrollTop;
     try {
-      const { chat, messages } = await api(
-        `/api/wa/thread?chat_id=${encodeURIComponent(waChat)}&limit=50`);
+      const data = await api(`/api/wa/thread?chat_id=${encodeURIComponent(waChat)}&limit=50`);
+      const { chat, messages } = data;
       $("waWho").textContent = chat.name + groupSuffix(chat);
-      panel.replaceChildren(...(messages.length ? messages.map(waBubble) : [note("Nothing here yet.")]));
+      showAssistantToggle(chat, data.default_mode);
+      panel.replaceChildren(...(messages.length
+        ? messages.map((m) => waBubble(m, chat.id))
+        : [note("Nothing here yet.")]));
       // The bridge refuses to send into a group, so do not offer a box that cannot.
       $("waReply").hidden = chat.is_group;
       if (chat.is_group) panel.append(note("Replying to groups from here is switched off."));
@@ -1229,6 +1395,7 @@
 
   $("waBack").onclick = () => {
     waChat = null;
+    $("waAutoWrap").hidden = true;
     $("waBack").hidden = true;
     $("waReply").hidden = true;
     $("waWho").textContent = "Your WhatsApp";

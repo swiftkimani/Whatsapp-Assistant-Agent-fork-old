@@ -422,16 +422,156 @@ def write_note(body: NoteRequest):
     return {"status": "saved", "chars": len(text)}
 
 
+def _assistant_state(chat_id: str, is_group: bool = False) -> dict:
+    """What the assistant will do with this conversation, for the pane to show.
+
+    A chat with nobody on the contact list has no setting of its own, so it
+    takes the default — which is worth saying out loud, because "chosen" and
+    "happens to be covered by the default" look identical until the default
+    changes.
+    """
+    name = contacts_store.name_for(chat_id)
+    mode = db.get_mode(name)
+    return {
+        "name": name,
+        "mode": mode,
+        "auto": mode == "auto" and not is_group,
+        "chosen": bool(name) and name.strip().lower() in db.all_modes(),
+        # The agent never answers a group, whatever the mode says.
+        "can_choose": not is_group,
+    }
+
+
 @router.get("/api/wa/chats", dependencies=[Depends(require_auth)])
 async def wa_chats(limit: int = Query(25, ge=1, le=100)):
     """Recent conversations, most recently active first."""
-    return await _bridge_read("/chats", {"limit": limit}, timeout=60)
+    data = await _bridge_read("/chats", {"limit": limit}, timeout=60)
+    for chat in data.get("chats", []):
+        chat["assistant"] = _assistant_state(chat["id"], chat.get("is_group", False))
+    data["default_mode"] = db.default_mode()
+    return data
 
 
 @router.get("/api/wa/thread", dependencies=[Depends(require_auth)])
 async def wa_thread(chat_id: str = Query(pattern=ANY_CHAT_ID), limit: int = Query(50, ge=1, le=100)):
     """One conversation, oldest message first."""
-    return await _bridge_read("/thread", {"chat_id": chat_id, "limit": limit}, timeout=90)
+    data = await _bridge_read("/thread", {"chat_id": chat_id, "limit": limit}, timeout=90)
+    chat = data.get("chat") or {}
+    chat["assistant"] = _assistant_state(chat_id, chat.get("is_group", False))
+    data["default_mode"] = db.default_mode()
+    return data
+
+
+class AssistantForChatRequest(BaseModel):
+    chat_id: str = Field(pattern=ANY_CHAT_ID)
+    name: str = Field(default="", max_length=60)
+    enabled: bool
+
+
+@router.post("/api/wa/assistant", dependencies=[Depends(require_auth)])
+async def set_assistant_for_chat(body: AssistantForChatRequest):
+    """Choose, from the conversation itself, whether the assistant answers it.
+
+    Picking someone here is what puts them on the contact list, so a person who
+    has written to you but was never saved on your phone can be chosen without
+    first being added by hand. Turning it off holds their replies for approval
+    rather than ignoring them: you asked to stop the sending, not to stop
+    hearing from them.
+    """
+    if body.chat_id.endswith("@g.us"):
+        raise HTTPException(400, "The assistant never answers group chats.")
+    try:
+        name = contacts_store.add_for_chat(body.chat_id, body.name)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+    mode = "auto" if body.enabled else "hold"
+    db.set_mode(name, mode)
+    db.log("mode_changed", f"{name}: {mode}")
+    log_event("mode_changed", mode=mode)   # no name or number in logs
+    return {"name": name, "assistant": _assistant_state(body.chat_id)}
+
+
+# What a browser may be handed as a picture, a video or a sound. Anything else
+# WhatsApp labels as media is served as a download, never rendered: the page
+# must not be talked into treating an arbitrary file as something to execute.
+RENDERABLE_MEDIA = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "video/mp4", "video/webm", "video/quicktime", "video/3gpp",
+    "audio/ogg", "audio/mpeg", "audio/mp4", "audio/aac", "audio/amr", "audio/wav",
+}
+
+
+@router.get("/api/wa/media", dependencies=[Depends(require_auth)])
+async def wa_media(chat_id: str = Query(pattern=ANY_CHAT_ID), msg_id: str = Query(min_length=1, max_length=120)):
+    """The bytes of one message's photo, video, sticker or voice note.
+
+    Fetched one at a time, when the thread actually shows it, because every one
+    of these is a download through the bridge's browser session.
+    """
+    r = await _bridge_post("/media", {"chat_id": chat_id, "msg_id": msg_id}, timeout=120)
+    if r.status_code == 404:
+        raise HTTPException(404, "That attachment is no longer on WhatsApp.")
+    if r.status_code == 413:
+        raise HTTPException(413, "That attachment is too large to show here.")
+    if r.status_code != 200:
+        raise HTTPException(502, f"The bridge could not fetch it ({r.status_code}).")
+
+    payload = r.json()
+    try:
+        raw = base64.b64decode(payload.get("data") or "", validate=True)
+    except (ValueError, TypeError):
+        raise HTTPException(502, "That attachment did not arrive intact.")
+
+    mimetype = str(payload.get("mimetype") or "application/octet-stream").split(";")[0].strip().lower()
+    # An unexpected type is still handed over, but as a download rather than as
+    # something the page will render in place.
+    disposition = "inline" if mimetype in RENDERABLE_MEDIA else "attachment"
+    log_event("wa_media_read", kind=mimetype, bytes=len(raw))  # no id, name or number
+    return Response(
+        content=raw,
+        media_type=mimetype if mimetype in RENDERABLE_MEDIA else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="attachment"',
+            "Cache-Control": "private, max-age=300",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/api/wa/avatar", dependencies=[Depends(require_auth)])
+async def wa_avatar(chat_id: str = Query(pattern=ANY_CHAT_ID)):
+    """A chat's profile photo.
+
+    The bridge hands back WhatsApp's own URL and the fetch happens here, so the
+    browser never talks to WhatsApp and that URL never reaches the page. No
+    photo is an ordinary answer, not an error: the other person may simply have
+    their privacy set so the owner cannot see one.
+    """
+    r = await _bridge_post("/avatar", {"chat_id": chat_id}, timeout=30)
+    if r.status_code != 200:
+        raise HTTPException(404, "No photo.")
+    url = str(r.json().get("url") or "")
+    if not url.startswith("https://"):
+        raise HTTPException(404, "No photo.")
+
+    try:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as http:
+            picture = await http.get(url)
+    except httpx.HTTPError:
+        raise HTTPException(502, "Could not fetch that photo.")
+    if picture.status_code != 200:
+        raise HTTPException(404, "No photo.")
+
+    mimetype = picture.headers.get("content-type", "").split(";")[0].strip().lower()
+    if not mimetype.startswith("image/"):
+        raise HTTPException(404, "No photo.")
+    return Response(
+        content=picture.content,
+        media_type=mimetype,
+        headers={"Cache-Control": "private, max-age=600", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/api/wa/stream", dependencies=[Depends(require_auth)])

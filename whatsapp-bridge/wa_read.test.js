@@ -117,3 +117,54 @@ test("nothing to show is not an error", () => {
   assert.deepStrictEqual(shapeChats([null, {}]), []);
   assert.deepStrictEqual(shapeMessages(null), []);
 });
+
+// ---- media: what the dashboard needs in order to show it ----
+
+const msg = (over = {}) => ({ id: { _serialized: "A" }, timestamp: 1, ...over });
+
+test("a photo says how to render it as well as what to call it", () => {
+  const [m] = shapeMessages([msg({ hasMedia: true, type: "image" })]);
+  assert.strictEqual(m.kind, "Photo");
+  assert.strictEqual(m.render_as, "image");
+  assert.strictEqual(m.has_media, true);
+});
+
+test("a sticker is rendered as a sticker, not as a photo", () => {
+  // Same element, smaller and without a frame: a sticker in a photo's box
+  // reads as a tiny broken picture.
+  assert.strictEqual(shapeMessages([msg({ hasMedia: true, type: "sticker" })])[0].render_as, "sticker");
+});
+
+test("a voice note and a plain audio file both play", () => {
+  assert.strictEqual(shapeMessages([msg({ hasMedia: true, type: "ptt" })])[0].render_as, "voice");
+  assert.strictEqual(shapeMessages([msg({ hasMedia: true, type: "audio" })])[0].render_as, "voice");
+});
+
+test("a video is rendered as a video", () => {
+  assert.strictEqual(shapeMessages([msg({ hasMedia: true, type: "video" })])[0].render_as, "video");
+});
+
+test("a document keeps its label and is not rendered inline", () => {
+  const [m] = shapeMessages([msg({ hasMedia: true, type: "document" })]);
+  assert.strictEqual(m.kind, "Document");
+  assert.strictEqual(m.render_as, "", "an unknown file must not be guessed at");
+});
+
+test("a view-once message is flagged so it is never fetched unasked", () => {
+  const [m] = shapeMessages([msg({ hasMedia: true, type: "image", isViewOnce: true })]);
+  assert.strictEqual(m.view_once, true);
+  assert.strictEqual(m.render_as, "image", "it still knows how to show it once asked");
+});
+
+test("a message with no media carries no media fields to act on", () => {
+  const [m] = shapeMessages([msg({ body: "just text" })]);
+  assert.strictEqual(m.has_media, false);
+  assert.strictEqual(m.render_as, "");
+  assert.strictEqual(m.media_type, "");
+});
+
+test("an unknown media type is labelled rather than dropped", () => {
+  const [m] = shapeMessages([msg({ hasMedia: true, type: "something_new" })]);
+  assert.strictEqual(m.kind, "Attachment");
+  assert.strictEqual(m.render_as, "");
+});

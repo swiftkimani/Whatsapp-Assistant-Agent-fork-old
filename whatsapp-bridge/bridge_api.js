@@ -14,7 +14,10 @@ const { shapeChats, shapeMessages, CHAT_ID, DEFAULT_CHATS, DEFAULT_MESSAGES } = 
 const CONTACTS_FILE = process.env.CONTACTS_FILE
   || path.resolve(__dirname, "..", "contacts.json");
 const ROUTES = ["/send-text", "/send-location", "/send-reply", "/sync-contacts",
-  "/chats", "/thread", "/send-self"];
+  "/chats", "/thread", "/send-self", "/media", "/avatar"];
+// A photo or a video can be large, and the whole thing is base64 in one JSON
+// reply. Past this it is not worth holding in memory on either side.
+const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
 let started = false; // "ready" can fire again after a reconnect
 
 // Re-read on every request so edits to contacts.json apply without a restart.
@@ -97,6 +100,56 @@ function startBridgeApi(client) {
             chat: { id: chatId, name: shapeChats([chat], { limit: 1 })[0].name, is_group: Boolean(chat.isGroup) },
             messages,
           });
+        }
+
+        // ---- one message's media, fetched only when the dashboard asks ----
+        // Never bundled with /thread: a thread of fifty messages would mean
+        // fifty downloads through the browser session for media most of which
+        // is never looked at.
+        if (req.url === "/media") {
+          const chatId = String(data.chat_id || "");
+          const msgId = String(data.msg_id || "");
+          if (!CHAT_ID.test(chatId) || !msgId) return reply(400, { error: "bad request" });
+
+          const msg = await client.getMessageById(msgId);
+          if (!msg) return reply(404, { error: "no such message" });
+          // The id names the message; the chat is checked so that holding a
+          // session cannot be used to read media out of a conversation the
+          // caller did not name.
+          const from = (msg.id && msg.id.remote) || msg.from || "";
+          if (String(from) !== chatId) return reply(404, { error: "no such message" });
+          if (!msg.hasMedia) return reply(404, { error: "no media" });
+
+          const media = await msg.downloadMedia();
+          if (!media || !media.data) return reply(404, { error: "media is gone" });
+          // WhatsApp drops media from its servers after a while, and an old
+          // message in an open thread is exactly when that shows up.
+          const bytes = Math.ceil((media.data.length * 3) / 4);
+          if (bytes > MAX_MEDIA_BYTES) return reply(413, { error: "too large" });
+
+          console.log(`[read] /media type=${msg.type} bytes=${bytes}`);  // no id, name or number
+          return reply(200, {
+            mimetype: media.mimetype || "application/octet-stream",
+            data: media.data,
+            filename: media.filename || "",
+          });
+        }
+
+        // ---- a chat's profile photo ----
+        // Returns the URL rather than the bytes: WhatsApp serves these from
+        // its own CDN and the backend fetches it, so the browser never talks
+        // to WhatsApp directly and the URL never reaches the page.
+        if (req.url === "/avatar") {
+          const chatId = String(data.chat_id || "");
+          if (!CHAT_ID.test(chatId)) return reply(400, { error: "bad chat id" });
+          const chat = await client.getChatById(chatId);
+          if (!chat) return reply(404, { error: "no such chat" });
+          const contact = await chat.getContact();
+          // Undefined means no photo, or one the owner is not allowed to see
+          // because of the other person's privacy setting. Both are "no photo".
+          const url = contact ? await contact.getProfilePicUrl() : null;
+          if (!url) return reply(404, { error: "no photo" });
+          return reply(200, { url: String(url) });
         }
 
         if (req.url === "/send-self") {

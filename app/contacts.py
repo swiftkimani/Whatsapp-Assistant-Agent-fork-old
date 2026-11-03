@@ -117,3 +117,34 @@ def add(name: str, number: str) -> str:
     # truncated recipient list behind.
     os.replace(tmp, CONTACTS_FILE)
     return name
+
+
+def add_for_chat(chat_id: str, suggested: str) -> str:
+    """Put the person behind a WhatsApp chat on the list, and return the name.
+
+    For choosing, on the WhatsApp tab, who the assistant answers: those chats
+    include people who were never saved on the phone, and a per-person setting
+    needs a name in this file to hang on.
+
+    Returns the name already stored when there is one, so choosing the same
+    person twice does not create a second entry.
+    """
+    existing = name_for(chat_id)
+    if existing:
+        return existing
+
+    base = chat_id.split("@")[0].split(":")[0]
+    # An "@lid" chat has no number to store, and the id itself is a valid
+    # recipient, so it is kept whole.
+    number = chat_id if chat_id.endswith("@lid") else _digits(base)
+    # WhatsApp has no name for some chats — a privacy id, or someone who has
+    # never been saved — so the digits stand in rather than the raw id.
+    name = " ".join((suggested or "").split())[:60] or _digits(base)[-9:] or "Unknown"
+
+    try:
+        return add(name, number)
+    except ValueError:
+        # The name is taken by somebody else. WhatsApp names are not unique and
+        # two people really can both be "Mum", so the line is what tells them
+        # apart — the same disambiguation the phone sync uses.
+        return add(f"{name} ({_digits(base)[-4:]})", number)

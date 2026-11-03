@@ -18,6 +18,18 @@ const DEFAULT_MESSAGES = 50;
 // broadcast lists are not conversations and are left out.
 const CHAT_ID = /^\d+@(c\.us|lid|g\.us)$/;
 
+// What the dashboard can render itself, and in which element. Anything not
+// here keeps its written label: a document or a contact card is a file, not
+// something to show inline, and guessing at one would break the layout.
+const RENDERABLE = {
+  image: "image", sticker: "sticker", video: "video", ptt: "voice", audio: "voice",
+};
+
+/** How the dashboard should show this, or "" for a label only. */
+function renderAs(type) {
+  return RENDERABLE[type] || "";
+}
+
 /** Something to show for a message with no text of its own. */
 function mediaLabel(type) {
   return {
@@ -73,12 +85,21 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES } = {}) {
       author: String(msg.author || "").split("@")[0].split(":")[0] || "",
       body: clip(msg.body, BODY_CHARS),
       kind: msg.hasMedia ? mediaLabel(msg.type) : "",
+      has_media: Boolean(msg.hasMedia),
+      // The raw type decides the element; the label above is the words.
+      media_type: msg.hasMedia ? String(msg.type || "") : "",
+      render_as: msg.hasMedia ? renderAs(msg.type) : "",
+      // Opening one of these is not like opening a photo: WhatsApp shows the
+      // sender it was opened, and it cannot be opened twice. So it is never
+      // fetched with the thread — the dashboard asks for it only when the
+      // owner says so.
+      view_once: Boolean(msg.isViewOnce),
     }))
     .sort((a, b) => a.ts - b.ts)   // oldest first: a thread reads downwards
     .slice(-Math.max(1, limit));
 }
 
 module.exports = {
-  shapeChats, shapeMessages, mediaLabel, chatName,
+  shapeChats, shapeMessages, mediaLabel, chatName, renderAs,
   CHAT_ID, DEFAULT_CHATS, DEFAULT_MESSAGES,
 };
