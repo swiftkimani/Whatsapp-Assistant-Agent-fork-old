@@ -13,7 +13,7 @@ instead of OpenAI.
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
 | Test suite | ✅ | 218 pytest + 54 `node --test` pass, 0 fail |
-| Dashboard UI | ✅ | rebuilt on design tokens; **not deployed yet** |
+| Dashboard UI | ✅ | rebuilt on design tokens; live (deployment `98ce06d`) |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
@@ -351,8 +351,15 @@ really about: a sender in no list and under no name reaches the agent, gets a
 reply, and is filed under their number.
 
 ## The dashboard rebuilt (2026-11-03)
-Committed and pushed, **not deployed** — the server still serves the previous
-build, which is why the width still jumps there between tabs.
+Live on the server as deployment `98ce06d`. Verified there rather than only
+locally: `--primary` computes to the dark-mode green, and `#app` measures
+1240px on all seven tabs, with the paired Chat and WhatsApp panes at 598px
+each — so every tab's content edges land in the same place.
+
+The symptom that prompted this was read as a bug in the new CSS and was not:
+the fix had been pushed and never deployed, so the server was still serving
+`#app[data-split="on"]` and the old purple tokens. Worth remembering — reading
+the deployed stylesheet settled it in one command, after guessing had not.
 
 - **Design tokens.** Five accent colours wired one per tab, an
   indigo-violet-pink gradient on the logo, the h1 text, every primary button
