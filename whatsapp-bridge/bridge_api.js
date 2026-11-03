@@ -8,13 +8,17 @@ const path = require("path");
 const { Location } = require("whatsapp-web.js");
 const { mergeContacts, DEFAULT_LIMIT } = require("./contacts_sync");
 const { shapeChats, shapeMessages, CHAT_ID, DEFAULT_CHATS, DEFAULT_MESSAGES } = require("./wa_read");
+const { qrToSvg } = require("./qr_svg");
 
 // Project root by default; CONTACTS_FILE moves it so the backend and the bridge
 // can share one copy when they run as separate containers.
 const CONTACTS_FILE = process.env.CONTACTS_FILE
   || path.resolve(__dirname, "..", "contacts.json");
 const ROUTES = ["/send-text", "/send-location", "/send-reply", "/sync-contacts",
-  "/chats", "/thread", "/send-self", "/media", "/avatar"];
+  "/chats", "/thread", "/send-self", "/media", "/avatar", "/link-status"];
+// Everything except /link-status needs a linked account. /link-status is the
+// one route that exists precisely because there is not one.
+const NEEDS_LINK = ROUTES.filter((r) => r !== "/link-status");
 // A photo or a video can be large, and the whole thing is base64 in one JSON
 // reply. Past this it is not worth holding in memory on either side.
 const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
@@ -49,7 +53,12 @@ function findEntry(name) {
   return null;
 }
 
-function startBridgeApi(client) {
+/**
+ * @param {object} client the WhatsApp client
+ * @param {{linked: boolean, qr: string|null}} link live link state, owned by
+ *        index.js and read on every request so the answer is never stale
+ */
+function startBridgeApi(client, link) {
   if (started) return;
 
   const token = process.env.BRIDGE_API_TOKEN;
@@ -68,6 +77,26 @@ function startBridgeApi(client) {
 
     if (req.method !== "POST" || !ROUTES.includes(req.url)) return reply(404, { error: "not found" });
     if (req.headers["x-bridge-token"] !== token) return reply(401, { error: "unauthorized" });
+
+    // Is this account linked, and if not, what should be shown to link it?
+    // Answered before the account exists, because the API now starts with the
+    // process rather than on "ready" — an unlinked bridge used to refuse every
+    // connection, which looked identical to a bridge that had crashed.
+    if (req.url === "/link-status") {
+      let qr = null;
+      if (!link.linked && link.qr) {
+        try {
+          qr = qrToSvg(link.qr);
+        } catch (err) {
+          console.error("Could not draw the QR:", err.message);
+        }
+      }
+      return reply(200, { linked: Boolean(link.linked), qr_svg: qr });
+    }
+
+    if (!link.linked && NEEDS_LINK.includes(req.url)) {
+      return reply(503, { error: "not linked" });
+    }
 
     let body = "";
     req.on("data", (chunk) => {

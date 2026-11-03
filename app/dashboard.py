@@ -442,6 +442,28 @@ def _assistant_state(chat_id: str, is_group: bool = False) -> dict:
     }
 
 
+@router.get("/api/wa/link", dependencies=[Depends(require_auth)])
+async def wa_link():
+    """Whether WhatsApp is linked, and the code to link it with.
+
+    A server has nowhere to show a QR: the terminal art in the bridge's logs
+    rotates every twenty seconds and cannot be scanned off a log viewer, and
+    requesting a pairing code has started failing. So the code is drawn here
+    and scanned off this page instead, which is the only route that needs
+    neither a visible browser on the server nor a session copied in by hand.
+    """
+    try:
+        r = await bridge.post("/link-status", {}, timeout=15)
+    except httpx.HTTPError:
+        # The bridge really is unreachable, which is a different problem from
+        # being reachable and unlinked. The page says so differently.
+        return {"reachable": False, "linked": False, "qr_svg": None}
+    if r.status_code != 200:
+        return {"reachable": True, "linked": False, "qr_svg": None}
+    body = r.json()
+    return {"reachable": True, "linked": bool(body.get("linked")), "qr_svg": body.get("qr_svg")}
+
+
 @router.get("/api/wa/chats", dependencies=[Depends(require_auth)])
 async def wa_chats(limit: int = Query(25, ge=1, le=100)):
     """Recent conversations, most recently active first."""

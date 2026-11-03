@@ -207,6 +207,15 @@
   #lang{padding:var(--s1) var(--s2);border-radius:var(--r-pill);font-size:var(--f-xs);font-weight:600;
         color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
 
+  /* linking WhatsApp */
+  .link-panel{margin:auto;text-align:center;max-width:360px;display:flex;flex-direction:column;
+              gap:var(--s3);align-items:center}
+  .link-panel img{width:260px;height:260px;max-width:100%;border-radius:var(--r-sm);
+                  border:1px solid var(--border);background:#fff}
+  .link-panel h2{margin:0;font-size:var(--f-lg)}
+  .link-panel ol{margin:0;padding-inline-start:var(--s4);text-align:start;color:var(--text-muted);
+                 font-size:var(--f-sm);line-height:1.7}
+
   /* media in a thread */
   .media-slot{margin-top:var(--s2)}
   .media-slot .note{color:inherit;opacity:.8}
@@ -1332,7 +1341,66 @@
     } finally { box.disabled = false; }
   };
 
+  // Linking. A server cannot show a QR of its own, so it is drawn here and
+  // scanned off this screen. WhatsApp rotates the code about every twenty
+  // seconds, so this refreshes while the panel is on display and stops as soon
+  // as it is not — there is no point holding a camera to a stale code.
+  let linkTimer = 0;
+
+  function stopLinkWatch() {
+    clearInterval(linkTimer);
+    linkTimer = 0;
+  }
+
+  function linkPanel(state) {
+    const wrap = el("div", "link-panel");
+    if (!state.reachable) {
+      wrap.append(el("h2", "", "The WhatsApp bridge is not running"),
+                  note("Nothing can be read or sent until it starts. Check the bridge logs."));
+      return wrap;
+    }
+    wrap.append(el("h2", "", "Link your WhatsApp"));
+    if (state.qr_svg) {
+      const img = el("img");
+      // Loaded as an image rather than injected as markup: an SVG in an <img>
+      // cannot run script, and this one is drawn from a code the bridge was
+      // handed.
+      img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(state.qr_svg)));
+      img.alt = "QR code for linking WhatsApp";
+      wrap.append(img);
+      const steps = el("ol");
+      for (const step of ["Open WhatsApp on your phone",
+                          "Tap Settings, then Linked devices",
+                          "Tap Link a device",
+                          "Point your camera at this code"]) {
+        steps.append(el("li", "", step));
+      }
+      wrap.append(steps, note("The code changes every few seconds. This one refreshes by itself."));
+    } else {
+      wrap.append(note("Waiting for a code from WhatsApp…"));
+    }
+    return wrap;
+  }
+
+  async function showLinkIfNeeded() {
+    try {
+      const state = await api("/api/wa/link");
+      if (state.linked) {
+        stopLinkWatch();
+        return false;
+      }
+      $("waPanel").replaceChildren(linkPanel(state));
+      $("waReply").hidden = true;
+      $("waAutoWrap").hidden = true;
+      if (!linkTimer) linkTimer = setInterval(() => { if (waOpen()) showLinkIfNeeded(); else stopLinkWatch(); }, 15000);
+      return true;
+    } catch {
+      return false;   // the page will fall back to its usual error
+    }
+  }
+
   async function loadWaChats() {
+    if (await showLinkIfNeeded()) return;
     try {
       const { chats } = await api("/api/wa/chats?limit=25");
       const unread = chats.reduce((n, c) => n + c.unread, 0);

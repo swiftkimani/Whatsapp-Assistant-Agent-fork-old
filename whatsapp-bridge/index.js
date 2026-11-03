@@ -120,12 +120,20 @@ console.log(`Using WhatsApp Web version ${WA_WEB_VERSION}`);
 const PAIRING_NUMBER = (process.env.PAIRING_NUMBER || "").replace(/\D/g, "");
 let pairingRequested = false;
 
+// Whether this account is linked, and the code to link it with. Shared with
+// the API, which reads it on every request. A server has nowhere to show a QR
+// — the terminal art in these logs rotates every twenty seconds and cannot be
+// scanned off a log viewer — so the dashboard shows it instead.
+const link = { linked: false, qr: null };
+
 function announcePairingCode(code) {
   const line = "=".repeat(54);
   console.log(`\n${line}\n  PAIRING CODE: ${code}\n  On your phone: WhatsApp > Linked devices >\n  "Link with phone number instead", then type this code.\n${line}\n`);
 }
 
 client.on("qr", async (qr) => {
+  link.qr = qr;
+  link.linked = false;
   if (!PAIRING_NUMBER) {
     console.log("Scan this QR code with WhatsApp > Linked devices:");
     qrcode.generate(qr, { small: true });
@@ -156,8 +164,21 @@ client.on("ready", () => {
   // a candidate number rather than by printing one.
   const me = client.info && client.info.wid ? client.info.wid._serialized : "";
   console.log(`WhatsApp bridge is ready. ECHO_ONLY = ${ECHO_ONLY} linked=${anon(me)}`);
-  startBridgeApi(client);
+  link.linked = true;
+  link.qr = null;              // nothing left to scan
+  pairingRequested = false;    // so a later disconnect can ask again
 });
+
+client.on("disconnected", (reason) => {
+  console.log(`WhatsApp disconnected: ${reason}`);
+  link.linked = false;
+  pairingRequested = false;
+});
+
+// The API used to start on "ready", so an unlinked bridge answered nothing at
+// all and the dashboard could not tell "not linked" from "not running". It
+// starts with the process now, and refuses the routes that need an account.
+startBridgeApi(client, link);
 
 // Every message in or out, so the dashboard's WhatsApp pane follows the real
 // thing instead of polling for it. Deliberately carries nothing but the chat

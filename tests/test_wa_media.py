@@ -128,3 +128,48 @@ def test_something_that_is_not_an_image_is_not_served_as_one(signed_in, bridge, 
 def test_a_photo_host_that_will_not_answer_is_not_a_crash(signed_in, bridge, cdn):
     cdn.response = httpx.ConnectError("down")
     assert signed_in.get(f"/api/wa/avatar?chat_id={CHAT}").status_code == 502
+
+
+# ---- linking: the one thing that has to work when nothing else does ----
+
+@pytest.fixture()
+def link_bridge(monkeypatch):
+    state = SimpleNamespace(reply=(200, {"linked": False, "qr_svg": "<svg>code</svg>"}))
+
+    async def fake_post(path, payload, timeout):
+        assert path == "/link-status"
+        if isinstance(state.reply, Exception):
+            raise state.reply
+        code, body = state.reply
+        return httpx.Response(code, json=body)
+
+    monkeypatch.setattr(dashboard.bridge, "post", fake_post)
+    return state
+
+
+def test_an_unlinked_bridge_hands_back_a_code_to_scan(signed_in, link_bridge):
+    r = signed_in.get("/api/wa/link").json()
+    assert r == {"reachable": True, "linked": False, "qr_svg": "<svg>code</svg>"}
+
+
+def test_a_linked_bridge_says_so_and_offers_no_code(signed_in, link_bridge):
+    link_bridge.reply = (200, {"linked": True, "qr_svg": None})
+    r = signed_in.get("/api/wa/link").json()
+    assert r["linked"] is True and r["qr_svg"] is None
+
+
+def test_a_bridge_that_is_down_is_not_the_same_as_one_that_is_unlinked(signed_in, link_bridge):
+    """One needs the process started; the other needs a phone. Telling the
+    owner the wrong one sends them to the wrong place."""
+    link_bridge.reply = httpx.ConnectError("down")
+    assert signed_in.get("/api/wa/link").json()["reachable"] is False
+
+
+def test_a_bridge_that_errors_is_reported_as_unlinked_rather_than_crashing(signed_in, link_bridge):
+    link_bridge.reply = (500, {"error": "boom"})
+    r = signed_in.get("/api/wa/link").json()
+    assert r["reachable"] is True and r["linked"] is False
+
+
+def test_the_link_status_needs_a_session(client, link_bridge):
+    assert client.get("/api/wa/link").status_code == 401
