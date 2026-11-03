@@ -461,7 +461,13 @@ async def wa_link():
     if r.status_code != 200:
         return {"reachable": True, "linked": False, "qr_svg": None}
     body = r.json()
-    return {"reachable": True, "linked": bool(body.get("linked")), "qr_svg": body.get("qr_svg")}
+    return {
+        "reachable": True,
+        "linked": bool(body.get("linked")),
+        "qr_svg": body.get("qr_svg"),
+        "stage": body.get("stage") or "",
+        "error": body.get("error"),
+    }
 
 
 @router.get("/api/wa/chats", dependencies=[Depends(require_auth)])

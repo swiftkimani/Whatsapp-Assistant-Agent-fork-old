@@ -1377,7 +1377,14 @@
       }
       wrap.append(steps, note("The code changes every few seconds. This one refreshes by itself."));
     } else {
-      wrap.append(note("Waiting for a code from WhatsApp…"));
+      wrap.append(note(state.stage ? `Waiting for a code from WhatsApp — ${state.stage}` : "Waiting for a code from WhatsApp…"));
+    }
+    // A refused scan used to leave no trace at all, so it looked identical to
+    // not having scanned. If WhatsApp gave a reason, it belongs on screen.
+    if (state.error) {
+      const failed = el("p", "note err", `WhatsApp refused the last attempt: ${state.error}`);
+      failed.dir = "auto";
+      wrap.append(failed);
     }
     return wrap;
   }

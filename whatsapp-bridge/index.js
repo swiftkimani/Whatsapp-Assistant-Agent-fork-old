@@ -124,7 +124,7 @@ let pairingRequested = false;
 // the API, which reads it on every request. A server has nowhere to show a QR
 // — the terminal art in these logs rotates every twenty seconds and cannot be
 // scanned off a log viewer — so the dashboard shows it instead.
-const link = { linked: false, qr: null };
+const link = { linked: false, qr: null, error: null, stage: "starting" };
 
 function announcePairingCode(code) {
   const line = "=".repeat(54);
@@ -134,6 +134,7 @@ function announcePairingCode(code) {
 client.on("qr", async (qr) => {
   link.qr = qr;
   link.linked = false;
+  link.stage = "waiting for a scan";
   if (!PAIRING_NUMBER) {
     console.log("Scan this QR code with WhatsApp > Linked devices:");
     qrcode.generate(qr, { small: true });
@@ -155,6 +156,26 @@ client.on("qr", async (qr) => {
 
 client.on("code", announcePairingCode);
 
+// Everything below exists because a failed scan used to be completely silent:
+// the only events reported were qr, ready and disconnected, so WhatsApp
+// refusing a link looked exactly like nobody having scanned yet.
+client.on("authenticated", () => {
+  console.log("Scan accepted — restoring the session.");
+  link.stage = "scan accepted, loading";
+  link.error = null;
+});
+
+client.on("auth_failure", (message) => {
+  console.error(`WhatsApp refused the link: ${message}`);
+  link.stage = "refused";
+  link.error = String(message || "WhatsApp refused the link");
+});
+
+client.on("loading_screen", (percent, message) => {
+  link.stage = `loading ${percent}%`;
+  console.log(`Loading ${percent}% ${message || ""}`.trim());
+});
+
 // client.on("ready", () => {
 //   console.log(`WhatsApp bridge is ready. ECHO_ONLY = ${ECHO_ONLY}`);
 // });
@@ -166,12 +187,15 @@ client.on("ready", () => {
   console.log(`WhatsApp bridge is ready. ECHO_ONLY = ${ECHO_ONLY} linked=${anon(me)}`);
   link.linked = true;
   link.qr = null;              // nothing left to scan
+  link.stage = "linked";
+  link.error = null;
   pairingRequested = false;    // so a later disconnect can ask again
 });
 
 client.on("disconnected", (reason) => {
   console.log(`WhatsApp disconnected: ${reason}`);
   link.linked = false;
+  link.stage = `disconnected: ${reason}`;
   pairingRequested = false;
 });
 

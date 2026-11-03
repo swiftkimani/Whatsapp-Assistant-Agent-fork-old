@@ -91,7 +91,14 @@ function startBridgeApi(client, link) {
           console.error("Could not draw the QR:", err.message);
         }
       }
-      return reply(200, { linked: Boolean(link.linked), qr_svg: qr });
+      return reply(200, {
+        linked: Boolean(link.linked),
+        qr_svg: qr,
+        // What the bridge is doing, and why the last attempt failed, so the
+        // owner is not left guessing whether their scan even arrived.
+        stage: link.stage || "",
+        error: link.error || null,
+      });
     }
 
     if (!link.linked && NEEDS_LINK.includes(req.url)) {

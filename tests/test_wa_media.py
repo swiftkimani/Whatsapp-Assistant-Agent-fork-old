@@ -149,7 +149,17 @@ def link_bridge(monkeypatch):
 
 def test_an_unlinked_bridge_hands_back_a_code_to_scan(signed_in, link_bridge):
     r = signed_in.get("/api/wa/link").json()
-    assert r == {"reachable": True, "linked": False, "qr_svg": "<svg>code</svg>"}
+    assert r["reachable"] is True and r["linked"] is False
+    assert r["qr_svg"] == "<svg>code</svg>"
+
+
+def test_a_refused_scan_says_why_instead_of_looking_like_no_scan(signed_in, link_bridge):
+    """Without this the two are indistinguishable: WhatsApp rejecting the link
+    and nobody having scanned both leave an unlinked bridge cycling codes."""
+    link_bridge.reply = (200, {"linked": False, "qr_svg": None,
+                               "stage": "refused", "error": "Unable to log in"})
+    r = signed_in.get("/api/wa/link").json()
+    assert r["error"] == "Unable to log in" and r["stage"] == "refused"
 
 
 def test_a_linked_bridge_says_so_and_offers_no_code(signed_in, link_bridge):
