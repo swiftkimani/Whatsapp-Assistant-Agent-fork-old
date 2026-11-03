@@ -9,7 +9,8 @@
  * @param {string} chatId        e.g. "2547...@c.us", "...@lid", "...@g.us"
  * @param {object} opts
  * @param {string[]} opts.allowed  allowlisted numbers, and/or the word
- *        "contacts" meaning everyone in the address book
+ *        "contacts" meaning everyone in the address book, or the word
+ *        "anyone" meaning every direct chat, saved or not
  * @param {boolean} opts.allowGroups
  * @param {() => string[]} [opts.addressBook] numbers from contacts.json,
  *        only called when "contacts" is listed
@@ -25,8 +26,18 @@ async function checkAllowed(chatId, { allowed, allowGroups, resolveContact, addr
   // does not survive contact sync, and the alternative people reach for —
   // leaving this empty — answers complete strangers.
   const usesAddressBook = entries.some((e) => e.toLowerCase() === "contacts");
-  const list = entries.map((n) => n.replace(/\D/g, "")).filter(Boolean);
-  if (usesAddressBook && typeof addressBook === "function") {
+  // "anyone" answers people who are not in the address book at all. Spelled
+  // out rather than left to the empty list, which means the same thing by
+  // accident: forgetting to set this must not be what opens the door.
+  const usesAnyone = entries.some((e) => e.toLowerCase() === "anyone");
+  const list = entries
+    .filter((e) => !["contacts", "anyone"].includes(e.toLowerCase()))
+    .map((n) => n.replace(/\D/g, ""))
+    .filter(Boolean);
+  // "anyone" already covers the address book, so it is not read at all: a
+  // broken contacts.json would otherwise fail closed over a list that no
+  // longer decides anything.
+  if (usesAddressBook && !usesAnyone && typeof addressBook === "function") {
     try {
       for (const number of addressBook()) {
         const digits = String(number).replace(/\D/g, "");
@@ -53,9 +64,15 @@ async function checkAllowed(chatId, { allowed, allowGroups, resolveContact, addr
       const contact = await resolveContact();
       if (contact && contact.number) number = String(contact.number).replace(/\D/g, "");
     } catch {
-      return { allowed: false, number, kind, reason: "lid_unresolved" };
+      // Still worth resolving under "anyone": the number is what lets the
+      // backend recognise a saved contact and honour the mode set for them.
+      // But it no longer decides whether the message is allowed, so failing
+      // to resolve one costs that name, not the reply.
+      if (!usesAnyone) return { allowed: false, number, kind, reason: "lid_unresolved" };
     }
   }
+
+  if (usesAnyone) return { allowed: true, number, kind, reason: "anyone" };
 
   if (entries.length === 0) return { allowed: true, number, kind, reason: "allowlist_empty" };
   if (list.length === 0) {

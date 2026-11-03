@@ -31,7 +31,10 @@ set -a; . ./.env; set +a
 [ -n "${BRIDGE_API_TOKEN:-}" ] || die "BRIDGE_API_TOKEN is not set in .env — /webhook rejects everything without it."
 
 [ -f contacts.json ] || warn "No contacts.json: Arianna has no valid recipients."
-[ -n "${ALLOWED_CONTACTS:-}" ] || warn "ALLOWED_CONTACTS is empty: EVERY sender gets auto-replies."
+[ -n "${ALLOWED_CONTACTS:-}" ] || warn "ALLOWED_CONTACTS is empty: EVERY sender reaches the assistant."
+case ",$(printf %s "${ALLOWED_CONTACTS:-}" | tr 'A-Z' 'a-z' | tr -d ' ')," in
+  *,anyone,*) warn "ALLOWED_CONTACTS=anyone: strangers reach the assistant, and what they get is the Contacts tab default." ;;
+esac
 grep -q '[^[:space:]]' <(sed -n '/^## Schedule/,/^## /p' data/kb/about_me.md 2>/dev/null | sed '1d;$d') \
   || warn "data/kb/about_me.md has no Schedule: 'where are you' questions will be declined."
 

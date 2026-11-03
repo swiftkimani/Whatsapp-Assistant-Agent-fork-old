@@ -45,6 +45,27 @@ def test_choosing_one_person_lets_only_that_person_through(signed_in, agent, fre
     assert client_action(signed_in, other) == "ignore"
 
 
+def test_someone_not_in_your_contacts_is_answered_under_anyone(signed_in, agent, monkeypatch):
+    """What "respond to anyone" has to mean end to end: a sender who is in no
+    list and under no name reaches the agent and gets a reply, and the record
+    of it is filed under their number because there is no name to use."""
+    monkeypatch.setenv("ALLOWED_CONTACTS", "anyone")
+    stranger = msg(**{"from": "254799999999@c.us", "number": "254799999999"})
+    assert client_action(signed_in, stranger) == "send"
+    items = signed_in.get("/api/messages").json()["items"]
+    assert [(m["direction"], m["name"]) for m in items] == [
+        ("out", "254799999999"), ("in", "254799999999")]
+
+
+def test_anyone_does_not_override_a_mode_you_set_for_one_person(signed_in, agent, monkeypatch):
+    """The allowlist decides who may reach the agent, not what they get. A
+    person you have put on "always ask me first" stays held."""
+    monkeypatch.setenv("ALLOWED_CONTACTS", "anyone")
+    signed_in.post("/api/contact-modes", json={"name": "Mom", "mode": "hold"})
+    assert client_action(signed_in, msg()) == "hold"
+    assert client_action(signed_in, msg(**{"from": "254799999999@c.us", "number": "254799999999"})) == "send"
+
+
 def client_action(client, body):
     return client.post("/webhook", json=body, headers=HEADERS).json()["action"]
 

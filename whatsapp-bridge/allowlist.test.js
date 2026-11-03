@@ -112,3 +112,43 @@ test("an unreadable address book fails closed", async () => {
 test("the empty allowlist still means everyone, which is still the documented risk", async () => {
   assert.strictEqual((await checkAllowed("254799999999@c.us", { allowed: [] })).allowed, true);
 });
+
+// ---- "anyone": answering people who are not saved ----
+
+test("anyone lets through a sender who is in no list at all", async () => {
+  const res = await checkAllowed("254799999999@c.us", { allowed: ["anyone"], allowGroups: false });
+  assert.strictEqual(res.allowed, true);
+  assert.strictEqual(res.reason, "anyone", "said so explicitly, not as an empty-list accident");
+});
+
+test("anyone still refuses groups", async () => {
+  const res = await checkAllowed("254799999999-149708@g.us", { allowed: ["anyone"], allowGroups: false });
+  assert.strictEqual(res.allowed, false);
+  assert.strictEqual(res.reason, "groups_off");
+});
+
+test("anyone never reads the address book, so a broken one costs nothing", async () => {
+  const res = await checkAllowed("254799999999@c.us", {
+    allowed: ["anyone", "contacts"],
+    addressBook: () => { throw new Error("broken json"); },
+  });
+  assert.strictEqual(res.allowed, true, "the book no longer decides anything");
+});
+
+test("an @lid is still resolved under anyone, so the saved name is found", async () => {
+  const res = await checkAllowed("112257593794569@lid", {
+    allowed: ["anyone"],
+    resolveContact: async () => ({ number: "+254 776 599915" }),
+  });
+  assert.strictEqual(res.allowed, true);
+  assert.strictEqual(res.number, "254776599915",
+    "the backend matches the contact by this number to honour the mode set for them");
+});
+
+test("an @lid that cannot be resolved is answered rather than dropped under anyone", async () => {
+  const res = await checkAllowed("112257593794569@lid", {
+    allowed: ["anyone"],
+    resolveContact: async () => { throw new Error("offline"); },
+  });
+  assert.strictEqual(res.allowed, true, "failing to resolve a name must not cost the reply");
+});

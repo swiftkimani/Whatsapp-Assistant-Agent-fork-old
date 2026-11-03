@@ -141,8 +141,9 @@ Listing messages is a database query: **the model never reads message contents a
 | Arianna's spoken replies (text only) | Microsoft's online voice service (edge-tts), or OpenAI if `TTS_PROVIDER=openai` (the only part that talks to OpenAI) |
 | Microphone audio for the wake word | The browser's speech service (Chrome or Edge), **only while "Say Arianna" is on** |
 
-Only chosen contacts are answered (`ALLOWED_CONTACTS`). Anyone talking to the assistant is talking to software that
-imitates me, so I keep it for practical messages and hold personal ones.
+`ALLOWED_CONTACTS` decides who reaches the assistant — a list of numbers, your address book, or `anyone`. Whoever
+reaches it is talking to software that imitates me, so I keep it for practical messages and hold personal ones. With
+`anyone`, that includes people who have never written before, which is worth being deliberate about.
 
 ## Setup
 
@@ -229,7 +230,7 @@ read before a first run.
 | `TRUST_PROXY` | `true` if behind a tunnel, so lockouts use the real client IP |
 | **`BRIDGE_API_TOKEN`** | Shared secret between bridge and backend (both directions) |
 | `BRIDGE_API_URL`, `BRIDGE_API_PORT`, `BACKEND_URL` | Where the two programs find each other |
-| **`ALLOWED_CONTACTS`** | Who may reach the assistant at all: phone numbers, and/or `contacts` for your whole address book. Empty means **everyone**, so set it before going live. *Who actually gets replies* is then chosen per person on the Contacts tab |
+| **`ALLOWED_CONTACTS`** | Who may reach the assistant at all: phone numbers, and/or `contacts` for your whole address book, or `anyone` for everybody who writes, saved or not. Empty means **everyone** too, so set it before going live — `anyone` is how you say that deliberately. *What they then get* is chosen per person on the Contacts tab, where **Anyone not chosen** covers everybody with no entry of their own, strangers included |
 | `CONTACTS_SYNC_LIMIT` | Most contacts one sync may add to `contacts.json` (default 500) |
 | `HISTORY_TURNS` | Past exchanges given to the model (default 12, capped at 50) |
 | `SEED_HISTORY` | Pull the existing WhatsApp thread the first time someone writes (default `true`) |

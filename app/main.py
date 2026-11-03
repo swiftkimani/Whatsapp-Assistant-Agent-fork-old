@@ -54,6 +54,13 @@ def is_allowed(contact_id: str, number: str | None = None) -> bool:
     if not entries:
         return True
 
+    # "anyone" answers every direct chat, whether or not the sender is saved.
+    # Spelled out rather than left to the empty list, which means the same
+    # thing by accident: forgetting to set this must not be what opens the
+    # door. It also makes the address book irrelevant, so it is not read.
+    if any(e.lower() == "anyone" for e in entries):
+        return True
+
     # "contacts" means everyone in the address book, which is the only setting
     # that stays correct as contacts are synced. An unreadable or empty book
     # means nobody rather than everybody.
@@ -128,6 +135,11 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
     name = name_for(msg.from_, msg.number)
     mode = db.get_mode(name)
     if mode == "ignore":
+        # Nothing is stored for an ignored message — that is the point of the
+        # mode — but the drop itself is worth a line. It is otherwise the one
+        # gate that can silently answer nobody: an allowlist of "anyone" with
+        # the default still on "leave alone" looks live and replies to no one.
+        log_event("ignored", chat=anon(msg.from_), known=bool(name))
         return {"action": "ignore"}
 
     # run_agent is blocking (LLM, Whisper, BLIP): keep it off the event loop

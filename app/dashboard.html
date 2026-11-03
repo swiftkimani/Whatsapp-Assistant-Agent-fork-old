@@ -316,7 +316,7 @@
     <div class="filters">
       <button id="syncContacts" class="ghost" type="button">Sync from WhatsApp</button>
       <label class="defmode">Anyone not chosen:
-        <select id="defaultMode" aria-label="What a contact you have not chosen gets">
+        <select id="defaultMode" aria-label="What anyone you have not chosen gets, saved or not">
           <option value="ignore">Leave alone</option>
           <option value="hold">Ask me first</option>
           <option value="auto">Reply automatically</option>
@@ -979,10 +979,10 @@
     } catch (err) { list.replaceChildren(note(err.message)); }
   }
 
-  // Copies the phone's address book into contacts.json, through the bridge.
-  // Only ever adds, so a name you chose yourself is never overwritten.
-  // Everyone you have not chosen gets this. Kept as "Ask me first" by default,
-  // so syncing an address book does not enrol it for automatic replies.
+  // Everyone you have not chosen gets this — including people who are not in
+  // the list below at all, since someone who has never been saved has no mode
+  // of their own either. So this is the setting that decides what a stranger
+  // gets, whenever ALLOWED_CONTACTS lets one reach the assistant.
   $("defaultMode").onchange = async () => {
     const select = $("defaultMode");
     select.disabled = true;
@@ -991,6 +991,8 @@
     finally { select.disabled = false; loadPeople(); }
   };
 
+  // Copies the phone's address book into contacts.json, through the bridge.
+  // Only ever adds, so a name you chose yourself is never overwritten.
   $("syncContacts").onclick = async () => {
     const button = $("syncContacts"), status = $("syncNote"), label = button.textContent;
     button.disabled = true;

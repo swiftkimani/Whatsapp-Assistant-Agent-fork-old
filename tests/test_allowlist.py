@@ -53,6 +53,26 @@ def test_an_unreadable_address_book_means_nobody(allow, contacts_file):
     assert not main.is_allowed("254712345678@c.us")
 
 
+def test_anyone_answers_a_sender_who_is_in_no_list_at_all(allow, contacts_file):
+    allow("anyone")
+    # not in the address book, not hand-typed anywhere
+    assert main.is_allowed("254799999999@c.us")
+    assert main.is_allowed("112257593794569@lid", number="254799999999")
+
+
+def test_anyone_still_refuses_groups(allow, monkeypatch):
+    allow("anyone")
+    monkeypatch.setattr(main, "ALLOW_GROUPS", False)
+    assert not main.is_allowed("254776599915-1497087597@g.us")
+
+
+def test_anyone_does_not_need_a_readable_address_book(allow, contacts_file):
+    # "contacts" fails closed on a broken book; "anyone" never reads it.
+    contacts_file.write_text("not json", encoding="utf-8")
+    allow("anyone,contacts")
+    assert main.is_allowed("254799999999@c.us")
+
+
 def test_a_resolved_lid_number_is_what_gets_compared(allow):
     allow("254712345678")
     assert main.is_allowed("112257593794569@lid", number="254712345678")
