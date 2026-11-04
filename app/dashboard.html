@@ -1276,6 +1276,8 @@
       : d.toLocaleDateString();
   };
   const groupSuffix = (c) => (c.is_group ? " · group" : "");
+  // One rule wherever a count is shown, so a busy chat cannot stretch its row.
+  const unreadLabel = (n) => (n > 99 ? "99+" : String(n));
 
   /** Turn the assistant on or off for one chat, from wherever it was asked. */
   async function setAssistantFor(chatId, name, enabled) {
@@ -1300,7 +1302,7 @@
     main.append(name, preview);
     const side = el("div", "wa-side");
     side.append(el("span", "wa-when", c.ts ? when(c.ts) : ""));
-    if (c.unread) side.append(el("span", "badge", String(c.unread)));
+    if (c.unread) side.append(el("span", "badge", unreadLabel(c.unread)));
     open.append(avatar(c.name, c.id), main, side);
     open.onclick = () => openWa(c.id, c.name);
     open.setAttribute("aria-label", `Open the conversation with ${c.name}`);
@@ -1642,7 +1644,7 @@
       const { chats } = await api("/api/wa/chats?limit=100");
       const unread = chats.reduce((n, c) => n + c.unread, 0);
       const badge = $("waUnread");
-      badge.textContent = unread > 99 ? "99+" : String(unread);
+      badge.textContent = unreadLabel(unread);
       badge.hidden = !unread;
       waChats = chats;
       if (!chats.length) {
