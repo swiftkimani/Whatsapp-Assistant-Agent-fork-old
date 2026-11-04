@@ -216,7 +216,9 @@ function startBridgeApi(client, link) {
           // chats are refused outright.
           const chatId = String(data.chat_id || "");
           const text = String(data.text || "").trim();
-          if (!/^\d+@(c\.us|lid)$/.test(chatId)) return reply(400, { error: "bad chat id" });
+          // No hyphen here on purpose: that is what keeps groups out, which
+          // the dashboard promises and the held queue depends on.
+          if (!/^\d[\d:]*@(c\.us|lid)$/.test(chatId)) return reply(400, { error: "bad chat id" });
           if (!text || text.length > 4000) return reply(400, { error: "bad text" });
           if (!(await client.getChatById(chatId))) return reply(404, { error: "no such chat" });
           await client.sendMessage(chatId, text);

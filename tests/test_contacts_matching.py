@@ -22,9 +22,13 @@ def test_two_different_people_do_not_match(contacts_file):
     assert not contacts._same_number("254712345678", "254799999999")
 
 
-def test_a_short_number_is_never_matched_on(contacts_file):
-    """Too few digits to be sure, so it is left alone rather than guessed at."""
-    assert not contacts._same_number("12345", "12345")
+def test_a_short_number_only_ever_matches_itself(contacts_file):
+    """Too few digits to reason about national forms, so the only safe answer
+    is exact equality — which is not a guess. It must never be stretched to
+    match a longer number that happens to end with it."""
+    assert contacts._same_number("12345", "12345")
+    assert not contacts._same_number("12345", "54321")
+    assert not contacts._same_number("12345", "254712345")
 
 
 def test_the_name_is_found_for_a_contact_saved_in_local_form(contacts_file):
@@ -33,3 +37,17 @@ def test_the_name_is_found_for_a_contact_saved_in_local_form(contacts_file):
     held replies were filed under a number."""
     contacts_file.write_text('{"Kawira": "0712345678"}', encoding="utf-8")
     assert contacts.name_for("254712345678@c.us") == "Kawira"
+
+
+def test_two_different_people_whose_last_nine_digits_collide(contacts_file):
+    """Brazilian 5511987654321 and Spanish 34987654321 end in the same nine
+    digits. Treating them as one hands a stranger whatever mode belongs to the
+    contact they collided with, files their messages under that name, and makes
+    the dashboard's toggle reconfigure somebody else."""
+    assert not contacts._same_number("5511987654321", "34987654321")
+    contacts_file.write_text('{"Bruno": "5511987654321"}', encoding="utf-8")
+    assert contacts.name_for("34987654321@c.us") is None
+
+
+def test_a_number_with_no_prefix_at_all_still_matches(contacts_file):
+    assert contacts._same_number("254712345678", "712345678")

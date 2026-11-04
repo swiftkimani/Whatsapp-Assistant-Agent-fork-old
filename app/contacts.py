@@ -31,15 +31,30 @@ def _digits(s: str) -> str:
 def _same_number(a: str, b: str) -> bool:
     """Is this one human reached two ways?
 
-    Compare the last 9 digits, which is what the allowlist already does in both
-    its copies. Comparing by suffix instead looked equivalent and was not: a
-    national number keeps the trunk zero in some countries ("201012345678" ends
-    with "01012345678") but replaces the country code with it in others, so
-    "254712345678" and "0712345678" — one Kenyan line — did not match. The
-    effect was quiet: name_for() returned nothing, and the person fell back to
-    the default mode instead of the one set for them.
+    One number must be the other written nationally: drop the trunk zero, and
+    the shorter has to be a tail of the longer.
+
+    A plain last-9 comparison is not enough. Brazilian 5511987654321 and
+    Spanish 34987654321 end in the same nine digits and are two different
+    people, and treating them as one hands a stranger whatever mode belongs to
+    the contact they collided with — their messages are filed under that name,
+    and choosing "let the assistant answer" on one silently reconfigures the
+    other.
+
+    Suffix comparison alone is not enough either: a national number keeps the
+    trunk zero in some countries ("201012345678" ends with "01012345678") but
+    replaces the country code with it in others, so "254712345678" and
+    "0712345678" — one Kenyan line — never matched, and that person quietly
+    got the default mode instead of the one chosen for them.
     """
-    return bool(a and b) and min(len(a), len(b)) >= 9 and a[-9:] == b[-9:]
+    if not (a and b):
+        return False
+    if a == b:
+        return True
+    longer, shorter = (a, b) if len(a) >= len(b) else (b, a)
+    national = shorter[1:] if shorter.startswith("0") else shorter
+    # Enough digits left to be a subscriber number rather than a coincidence.
+    return len(national) >= 7 and len(longer) > len(national) and longer.endswith(national)
 
 
 def name_for(chat_id: str, number: str | None = None) -> str | None:

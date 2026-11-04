@@ -16,7 +16,11 @@ const DEFAULT_MESSAGES = 50;
 
 // A direct chat, a privacy-id chat, or a group. Status updates, channels and
 // broadcast lists are not conversations and are left out.
-const CHAT_ID = /^\d+@(c\.us|lid|g\.us)$/;
+// Digits, plus a ":12" multi-device suffix or a classic group's
+// "<creator>-<created>" stamp. Only groups made since the renumbering use the
+// all-digit 120363... form, so requiring that dropped every older group from
+// the pane — the conversations were simply missing, with nothing to show why.
+const CHAT_ID = /^\d[\d:-]*@(c\.us|lid|g\.us)$/;
 
 // What the dashboard can render itself, and in which element. Anything not
 // here keeps its written label: a document or a contact card is a file, not

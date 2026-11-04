@@ -30,7 +30,7 @@ test("status updates, channels and broadcast lists are not conversations", () =>
     chat({ id: { _serialized: "status@broadcast" } }),
     chat({ id: { _serialized: "120363000000000000@newsletter" } }),
     chat({ id: { _serialized: "1234567890@broadcast" } }),
-    chat({ id: { _serialized: "254700000000-123456@g.us" } }),   // malformed group id
+    chat({ id: { _serialized: "status@broadcast" } }),           // not a conversation
     chat({ id: { _serialized: "254712345678@c.us" } }),
   ]);
   assert.deepStrictEqual(out.map((c) => c.id), ["254712345678@c.us"]);

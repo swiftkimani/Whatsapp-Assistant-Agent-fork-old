@@ -355,7 +355,8 @@ async def send_location(body: LocationRequest):
 # way to their own screen. Opening a thread here sends no read receipt either.
 
 DIRECT_CHAT_ID = r"^\d+@(c\.us|lid)$"          # one person
-ANY_CHAT_ID = r"^\d+@(c\.us|lid|g\.us)$"       # or a group
+# Digits, plus a ":12" device suffix or a classic group's "-<created>" stamp.
+ANY_CHAT_ID = r"^\d[\d:-]*@(c\.us|lid|g\.us)$"       # or a group
 
 
 class ReplyRequest(BaseModel):
