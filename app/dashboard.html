@@ -118,7 +118,11 @@
          padding:2px var(--s2);border-radius:var(--r-pill);border:1px solid var(--border)}
   .wa-ai input{width:auto;padding:0;margin:0;accent-color:var(--primary)}
   .wa-ai.on{color:var(--primary);border-color:var(--primary)}
-  .wa-ai.muted{cursor:default;opacity:.7}
+  .wa-ai.muted{display:none}          /* a group cannot be answered; saying so on every row is noise */
+  .wa-row.wa-assistant{border-color:var(--primary);background:var(--primary-weak)}
+  .wa-row.wa-assistant .avatar{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+  #assistantPane{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s2)}
+  #assistantPane #log{flex:1;min-height:0}
   .wa-row[aria-current="true"]{border-color:var(--primary);background:var(--primary-weak)}
   .wa-main{min-width:0;flex:1}
   .wa-name{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -139,10 +143,13 @@
      trip to fetch chats that had never changed. */
   .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
   .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
-  .wa-list-col{flex:0 0 clamp(240px,32%,340px)}
+  /* The list leads, as it does in WhatsApp itself, and gets room for a real
+     conversation name rather than three truncated words. */
+  .wa-list-col{flex:0 0 clamp(300px,30%,400px)}
   /* The list is right there, so there is nothing to go back to. The button is
      only meaningful once the columns stack. */
   @media (min-width:901px){ #waBack{display:none} }
+  .wa-split[data-open="list"] .wa-thread-col .panel{display:grid;place-items:center}
   @media (max-width:900px){
     /* One at a time on a narrow screen, with the back button to return. */
     .wa-split{display:block;position:relative;height:100%}
@@ -356,7 +363,6 @@
   </header>
 
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button id="tab-chat" data-tab="chat" role="tab" aria-selected="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg><span class="lbl">Chat</span></button>
     <button id="tab-whatsapp" data-tab="whatsapp" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg><span class="lbl">WhatsApp</span><span id="waUnread" class="badge" hidden></span></button>
     <button id="tab-held" data-tab="held" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="lbl">Held</span><span id="heldCount" class="badge" hidden></span></button>
     <button id="tab-messages" data-tab="messages" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span class="lbl">Messages</span></button>
@@ -366,27 +372,15 @@
   </nav>
 
   <div id="pair" class="pair">
-  <section id="view-chat" class="view">
-    <div id="log" class="panel" aria-live="polite">
-      <div id="empty" class="empty">
-        <div class="hero" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
-        <h2>What can I do for you?</h2>
-        <p>Ask me to send something, or to read your messages out loud.</p>
-        <div id="suggest" class="suggest"></div>
-      </div>
-    </div>
-    <form id="composer">
-      <input id="text" dir="auto" placeholder="Message your assistant…" aria-label="Instruction" autocomplete="off">
-      <button id="lang" type="button" aria-label="Dictation language: automatic" title="Dictation language: AUTO hears Kiswahili or English">AUTO</button>
-      <button id="mic" class="round" type="button" aria-label="Dictate" title="Dictate"></button>
-      <button id="send" class="round go" type="submit" aria-label="Send to assistant" title="Ask">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </button>
-    </form>
-  </section>
-
   <section id="view-whatsapp" class="view" hidden>
-    <div class="wa-split">
+    <div class="wa-split" data-open="list">
+      <div class="wa-col wa-list-col">
+        <div class="filters">
+          <strong class="wa-who">Chats</strong>
+          <button id="waRefresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="waList" class="panel"></div>
+      </div>
       <div class="wa-col wa-thread-col">
         <div class="filters">
           <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
@@ -400,13 +394,24 @@
              poll, which would re-announce the entire thread to a screen
              reader each time. -->
         <div id="waPanel" class="panel"></div>
-      </div>
-      <div class="wa-col wa-list-col">
-        <div class="filters">
-          <strong class="wa-who">Chats</strong>
-          <button id="waRefresh" class="ghost" type="button">Refresh</button>
+        <div id="assistantPane" hidden>
+        <div id="log" class="panel" aria-live="polite">
+              <div id="empty" class="empty">
+                <div class="hero" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></div>
+                <h2>What can I do for you?</h2>
+                <p>Ask me to send something, or to read your messages out loud.</p>
+                <div id="suggest" class="suggest"></div>
+              </div>
+            </div>
+            <form id="composer">
+              <input id="text" dir="auto" placeholder="Message your assistant…" aria-label="Instruction" autocomplete="off">
+              <button id="lang" type="button" aria-label="Dictation language: automatic" title="Dictation language: AUTO hears Kiswahili or English">AUTO</button>
+              <button id="mic" class="round" type="button" aria-label="Dictate" title="Dictate"></button>
+              <button id="send" class="round go" type="submit" aria-label="Send to assistant" title="Ask">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              </button>
+            </form>
         </div>
-        <div id="waList" class="panel"></div>
       </div>
     </div>
     <form id="waReply" hidden>
@@ -593,24 +598,21 @@
     log.replaceChildren($("empty"));
     $("empty").hidden = false;
     history.length = 0;
-    show("chat");
+    show("whatsapp");
     showGate();
   };
 
   fetch("/api/session").then((r) => (r.ok ? showApp() : showGate())).catch(showGate);
 
   // ---- tabs ----
-  const VIEWS = ["chat", "whatsapp", "held", "messages", "activity", "notes", "people"];
-  // Both of these live inside the #pair wrapper, which keeps its own height.
-  const PAIRED = ["chat", "whatsapp"];
-  let currentView = "chat";
+  // The assistant is no longer a tab: it is the first conversation in the
+  // list, opened in the same column as any other chat.
+  const VIEWS = ["whatsapp", "held", "messages", "activity", "notes", "people"];
+  const PAIRED = ["whatsapp"];
+  let currentView = "whatsapp";
 
   function show(name) {
     currentView = name;
-    // Chat and WhatsApp used to be shown side by side on a wide screen. Now
-    // that the WhatsApp view is itself two columns — the conversation beside
-    // the list — pairing them made three, each too narrow to read, and put a
-    // second chat surface on screen next to the first. One at a time.
     $("pair").hidden = !PAIRED.includes(name);
     for (const v of VIEWS) {
       $("view-" + v).hidden = v !== name;
@@ -1276,6 +1278,7 @@
     // a button is neither valid nor reachable by keyboard. Choosing who the
     // assistant answers used to mean opening each conversation in turn.
     const row = el("div", "wa-row");
+    row.dataset.chat = c.id;
     row.setAttribute("aria-current", String(c.id === waChat));
 
     const open = btn("", "wa-openrow");
@@ -1531,6 +1534,44 @@
     }
   }
 
+  // Which conversation the right-hand column is showing: a chat id, or the
+  // assistant itself. Treating the assistant as one more conversation is what
+  // let its tab go away.
+  const ASSISTANT = "__assistant__";
+
+  function showAssistant() {
+    waChat = null;
+    $("waWho").textContent = ASSISTANT_NAME;
+    $("waAutoWrap").hidden = true;
+    $("waReply").hidden = true;
+    $("waPanel").hidden = true;
+    $("assistantPane").hidden = false;
+    waSplit().dataset.open = "thread";
+    $("waBack").hidden = false;
+    markOpenRow(ASSISTANT);
+    $("text").focus();
+  }
+
+  function markOpenRow(id) {
+    for (const row of $("waList").querySelectorAll(".wa-row")) {
+      row.setAttribute("aria-current", String(row.dataset.chat === id));
+    }
+  }
+
+  function assistantRow() {
+    const row = el("div", "wa-row wa-assistant");
+    row.dataset.chat = ASSISTANT;
+    const open = btn("", "wa-openrow");
+    const main = el("div", "wa-main");
+    main.append(el("span", "wa-name", ASSISTANT_NAME),
+                el("span", "wa-prev", "Ask me to read or send your messages"));
+    open.append(avatar(ASSISTANT_NAME), main);
+    open.onclick = showAssistant;
+    open.setAttribute("aria-label", `Open your conversation with ${ASSISTANT_NAME}`);
+    row.append(open);
+    return row;
+  }
+
   async function loadWaChats() {
     if (await showLinkIfNeeded()) return;
     try {
@@ -1542,10 +1583,11 @@
       const badge = $("waUnread");
       badge.textContent = unread > 99 ? "99+" : String(unread);
       badge.hidden = !unread;
-      $("waList").replaceChildren(...(chats.length
+      $("waList").replaceChildren(assistantRow(), ...(chats.length
         ? chats.map(waChatRow)
         : [note("No conversations yet. Once someone messages you they show up here.")]));
-    } catch (err) { $("waList").replaceChildren(note(err.message)); }
+      markOpenRow($("assistantPane").hidden ? waChat : ASSISTANT);
+    } catch (err) { $("waList").replaceChildren(assistantRow(), note(err.message)); }
   }
 
   async function showDraftFor(chatId, scrollToIt) {
@@ -1616,8 +1658,11 @@
 
   function openWa(id, name) {
     waChat = id;
+    $("assistantPane").hidden = true;
+    $("waPanel").hidden = false;
     $("waWho").textContent = name;
     $("waBack").hidden = false;
+    markOpenRow(id);
     waSplit().dataset.open = "thread";
     $("waPanel").replaceChildren(note("Opening…"));
     // Only the thread: the list is already on screen and unchanged.
@@ -1626,14 +1671,16 @@
 
   $("waBack").onclick = () => {
     waChat = null;
+    $("assistantPane").hidden = true;
+    $("waPanel").hidden = false;
     $("waAutoWrap").hidden = true;
     $("waBack").hidden = true;
     $("waReply").hidden = true;
     $("waWho").textContent = "Pick a conversation";
     waSplit().dataset.open = "list";
     // Instant: the list never went anywhere, so there is nothing to refetch.
-    $("waPanel").replaceChildren(note("Pick a conversation on the right to read it here."));
-    for (const row of $("waList").querySelectorAll(".wa-row")) row.setAttribute("aria-current", "false");
+    $("waPanel").replaceChildren(note("Pick a conversation on the left to read it here."));
+    markOpenRow("");
   };
   $("waRefresh").onclick = () => loadWa();
 
