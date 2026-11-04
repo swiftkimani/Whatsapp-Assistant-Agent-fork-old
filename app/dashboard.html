@@ -357,6 +357,22 @@
   }
   /* A draft waiting on you is the one thing on this screen that needs doing,
      so it does not look like another message. */
+  /* One row per person, opened to show their drafts. Fifty cards in a single
+     column is a list nobody can work through; seven names with counts is. */
+  .heldgroup{border-bottom:1px solid var(--border)}
+  .heldgroup:last-child{border-bottom:0}
+  .heldgroup > summary{display:flex;gap:var(--s3);align-items:center;padding:var(--s2) var(--s3);
+                       cursor:pointer;list-style:none}
+  .heldgroup > summary::-webkit-details-marker{display:none}
+  .heldgroup > summary:hover{background:var(--surface-raised)}
+  .heldgroup[open] > summary{background:var(--surface-raised)}
+  .heldgroup .wa-main{flex:1;min-width:0}
+  .heldgroup .count{flex:none;font-size:var(--f-xs);font-weight:700;color:var(--primary-fg);
+                    background:var(--primary);border-radius:var(--r-pill);padding:0 var(--s2);
+                    line-height:20px}
+  .heldgroup .chev{flex:none;color:var(--text-muted);transition:transform var(--d-base) var(--ease)}
+  .heldgroup[open] .chev{transform:rotate(90deg)}
+  .heldbody{padding:var(--s2) var(--s3) var(--s3);display:flex;flex-direction:column;gap:var(--s3)}
   .wa-draft{margin-top:var(--s3);border:1px solid var(--warning);
             border-inline-start-width:4px;background:var(--surface-raised)}
   .wa-draft .wa-kind{color:var(--warning);text-transform:uppercase;letter-spacing:.06em}
@@ -644,7 +660,13 @@
   </section>
   </div>
 
-  <section id="view-held" class="view" hidden><div id="heldList" class="panel"></div></section>
+  <section id="view-held" class="view" hidden>
+    <div class="wa-find">
+      <input id="heldSearch" class="wa-search" type="search" autocomplete="off"
+             placeholder="Search who is waiting" aria-label="Search the people waiting on a reply">
+    </div>
+    <div id="heldList" class="panel flat"></div>
+  </section>
 
   <section id="view-messages" class="view" hidden>
     <div class="filters">
@@ -1442,15 +1464,49 @@
     return card;
   }
 
+  /** One person's waiting drafts, folded away until you ask for them. The
+   *  open ones are remembered across a refresh, because this list reloads
+   *  every thirty seconds and a group that closed under you mid-read would
+   *  be worse than no refresh at all. */
+  const heldOpen = new Set();
+
+  function heldGroup(g) {
+    const box = el("details", "heldgroup");
+    box.open = heldOpen.has(g.chat_id);
+    box.ontoggle = () => (box.open ? heldOpen.add(g.chat_id) : heldOpen.delete(g.chat_id));
+    const head = el("summary");
+    const main = el("div", "wa-main");
+    const who = el("span", "wa-name", g.name || g.from);
+    const newest = g.items[0];
+    const prev = el("span", "wa-prev", newest ? newest.incoming : "");
+    who.dir = prev.dir = "auto";
+    main.append(who, prev);
+    const chev = el("span", "chev");
+    chev.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+    head.append(avatar(g.name || g.from, g.chat_id), main,
+                el("span", "count", String(g.count)), chev);
+    const body = el("div", "heldbody");
+    body.append(...g.items.map(heldCard));
+    box.append(head, body);
+    return box;
+  }
+
   async function refreshHeld(force) {
     if (app.hidden) return;
     if (!force && heldList.contains(document.activeElement)) return;   // don't wipe a reply being edited
     try {
-      const [{ items }, status] = await Promise.all([api("/api/held"), api("/api/status")]);
+      const [data, status] = await Promise.all([api("/api/held/by-contact"), api("/api/status")]);
       applyStatus(status);
-      heldList.replaceChildren(...(items.length ? items.map(heldCard) : [note("Nothing waiting for approval.")]));
+      const term = $("heldSearch").value.trim().toLowerCase();
+      const groups = data.groups.filter((g) =>
+        !term || (g.name || g.from || "").toLowerCase().includes(term));
+      heldList.replaceChildren(...(groups.length
+        ? groups.map(heldGroup)
+        : [note(term ? "Nobody matches that."
+                     : "Nothing waiting for approval.")]));
     } catch { /* session expired (lock screen showing) or backend offline */ }
   }
+  $("heldSearch").oninput = () => refreshHeld(true);
   setInterval(refreshHeld, 30000);
 
   // ---- activity ----
