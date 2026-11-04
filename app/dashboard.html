@@ -124,6 +124,23 @@
   .waauto.on{color:var(--primary)}
   /* On the list, a chat the assistant answers says so in a word, not a colour. */
   .wa-auto{font-size:var(--f-xs);font-weight:600;color:var(--primary);white-space:nowrap}
+  /* The conversation on the left, the list on the right, both always there.
+     The list used to be replaced by the thread, so every "back" was a round
+     trip to fetch chats that had never changed. */
+  .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
+  .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
+  .wa-list-col{flex:0 0 clamp(240px,32%,340px)}
+  /* The list is right there, so there is nothing to go back to. The button is
+     only meaningful once the columns stack. */
+  @media (min-width:901px){ #waBack{display:none} }
+  @media (max-width:900px){
+    /* One at a time on a narrow screen, with the back button to return. */
+    .wa-split{display:block;position:relative;height:100%}
+    .wa-col{height:100%}
+    .wa-split[data-open="list"] .wa-thread-col{display:none}
+    .wa-split[data-open="thread"] .wa-list-col{display:none}
+    .wa-list-col{flex:none}
+  }
   .wa-draft{margin-top:var(--s3);border-inline-start:3px solid var(--warning)}
   .wa-draft .wa-kind{color:var(--warning)}
 
@@ -359,16 +376,29 @@
   </section>
 
   <section id="view-whatsapp" class="view" hidden>
-    <div class="filters">
-      <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
-      <strong id="waWho" class="wa-who" dir="auto">Your WhatsApp</strong>
-      <label id="waAutoWrap" class="waauto" hidden>
-        <input id="waAuto" type="checkbox">
-        <span id="waAutoLabel">Assistant replies</span>
-      </label>
-      <button id="waRefresh" class="ghost" type="button">Refresh</button>
+    <div class="wa-split">
+      <div class="wa-col wa-thread-col">
+        <div class="filters">
+          <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
+          <strong id="waWho" class="wa-who" dir="auto">Pick a conversation</strong>
+          <label id="waAutoWrap" class="waauto" hidden>
+            <input id="waAuto" type="checkbox">
+            <span id="waAutoLabel">Assistant replies</span>
+          </label>
+        </div>
+        <!-- Deliberately not a live region: it is replaced wholesale on every
+             poll, which would re-announce the entire thread to a screen
+             reader each time. -->
+        <div id="waPanel" class="panel"></div>
+      </div>
+      <div class="wa-col wa-list-col">
+        <div class="filters">
+          <strong class="wa-who">Chats</strong>
+          <button id="waRefresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="waList" class="panel"></div>
+      </div>
     </div>
-    <div id="waPanel" class="panel" aria-live="polite"></div>
     <form id="waReply" hidden>
       <input id="waText" dir="auto" placeholder="Reply as yourself…" aria-label="Reply as yourself" autocomplete="off">
       <button class="round go" type="submit" aria-label="Send to this chat" title="Send">
@@ -466,12 +496,20 @@
   // The initial is drawn first and the photo replaces it only once it has
   // actually loaded, so a chat with no photo — or someone whose privacy
   // setting hides it from you — shows a letter rather than a broken image.
+  // Remembered across repaints. Without it the list refetches every photo on
+  // each redraw, and a chat with no photo answers 404 — which carries no cache
+  // headers, so it costs a round trip through the bridge's single browser page
+  // every single time. At a hundred chats that starves everything queued
+  // behind it, including the assistant's own replies.
+  const avatarSeen = new Map();   // chatId -> "none" once it is known to have no photo
+
   function avatar(name, chatId) {
     const a = el("div", "avatar", (String(name || "?").trim()[0] || "?").toUpperCase());
-    if (!chatId) return a;
+    if (!chatId || avatarSeen.get(chatId) === "none") return a;
     const img = new Image();
     img.alt = "";
     img.onload = () => a.replaceChildren(img);
+    img.onerror = () => avatarSeen.set(chatId, "none");   // do not ask again
     img.src = `/api/wa/avatar?chat_id=${encodeURIComponent(chatId)}`;
     return a;
   }
@@ -553,21 +591,19 @@
 
   // ---- tabs ----
   const VIEWS = ["chat", "whatsapp", "held", "messages", "activity", "notes", "people"];
-  // On a wide screen these two are shown together, which is the whole point of
-  // the WhatsApp pane: your conversations next to the assistant reading them.
+  // Both of these live inside the #pair wrapper, which keeps its own height.
   const PAIRED = ["chat", "whatsapp"];
-  const roomForBoth = window.matchMedia("(min-width:1024px)");
   let currentView = "chat";
 
   function show(name) {
     currentView = name;
-    const split = roomForBoth.matches && PAIRED.includes(name);
-    app.dataset.split = split ? "on" : "off";
-    // The wrapper holds a flex share of the height even when both panes inside
-    // it are hidden, which would squash whichever view is actually showing.
+    // Chat and WhatsApp used to be shown side by side on a wide screen. Now
+    // that the WhatsApp view is itself two columns — the conversation beside
+    // the list — pairing them made three, each too narrow to read, and put a
+    // second chat surface on screen next to the first. One at a time.
     $("pair").hidden = !PAIRED.includes(name);
     for (const v of VIEWS) {
-      $("view-" + v).hidden = split ? !PAIRED.includes(v) : v !== name;
+      $("view-" + v).hidden = v !== name;
       $("tab-" + v).setAttribute("aria-selected", String(v === name));
     }
     // The strip scrolls on a phone, so the tab you just picked has to be
@@ -581,7 +617,6 @@
     if (!$("view-whatsapp").hidden) loadWa(true);
   }
   document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
-  roomForBoth.addEventListener("change", () => show(currentView));
 
   // ---- status chips (the two switches) ----
   const autoBtn = $("autoBtn"), directBtn = $("directBtn"), copyBtn = $("copyBtn");
@@ -805,7 +840,12 @@
   function startWake() {
     if (!SR || !wakeOn || wakeHolds > 0 || wakeRec || app.hidden) return;
     const r = new SR();
-    r.lang = "ar-EG"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;   // only used to hear the name
+    // Kenyan English: the recognizer only has to catch the name, and the
+    // question itself goes to Whisper. This was still "ar-EG" after the move
+    // off Arabic, so it returned Arabic-script transcripts that the Latin
+    // wake-word pattern could never match — the microphone stayed on and
+    // nothing ever fired.
+    r.lang = "en-KE"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 3;
     r.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const heard = Array.from(e.results[i]).map((x) => x.transcript).find((t) => WAKE.test(t));
@@ -1279,7 +1319,16 @@
       const show = () => {
         const node = mediaElement(m, chatId);
         if (!node) return;
-        node.onerror = () => holder.replaceChildren(note("That attachment is no longer on WhatsApp."));
+        // An <img>/<video> error cannot read the status, and the server has
+        // three different reasons — gone, too large, damaged. Claiming the
+        // first sends the owner looking for a message still on their phone,
+        // so say what is true and offer the file itself.
+        node.onerror = () => {
+          const link = el("a", "reveal", "Couldn’t show it — download instead");
+          link.href = mediaUrl(chatId, m.id);
+          link.download = "";
+          holder.replaceChildren(link);
+        };
         holder.replaceChildren(node);
       };
       if (m.view_once) {
@@ -1393,7 +1442,10 @@
         note("On your phone: Linked devices, then “Link with phone number instead”, and type this."));
     }
     if (!state.qr_svg && !state.code) {
-    } else {
+      // The common case for the first seconds after the bridge starts, and
+      // where the owner most needs to be told something is happening. The
+      // branches were the wrong way round: this said nothing while waiting,
+      // and contradicted the QR once there was one.
       wrap.append(note(state.stage ? `Waiting for a code from WhatsApp — ${state.stage}` : "Waiting for a code from WhatsApp…"));
     }
     // A refused scan used to leave no trace at all, so it looked identical to
@@ -1411,6 +1463,13 @@
       const state = await api("/api/wa/link");
       if (state.linked) {
         stopLinkWatch();
+        // The poll used to just stop, leaving the scanned code on screen until
+        // some other refresh happened along — up to a minute staring at a code
+        // that had already worked, which invites a needless rescan.
+        const panel = $("waPanel");
+        if (panel.querySelector(".link-panel")) {
+          panel.replaceChildren(note(waChat ? "Opening…" : "Pick a conversation on the right to read it here."));
+        }
         return false;
       }
       $("waPanel").replaceChildren(linkPanel(state));
@@ -1434,13 +1493,13 @@
       const badge = $("waUnread");
       badge.textContent = unread > 99 ? "99+" : String(unread);
       badge.hidden = !unread;
-      $("waPanel").replaceChildren(...(chats.length
+      $("waList").replaceChildren(...(chats.length
         ? chats.map(waChatRow)
         : [note("No conversations yet. Once someone messages you they show up here.")]));
-    } catch (err) { $("waPanel").replaceChildren(note(err.message)); }
+    } catch (err) { $("waList").replaceChildren(note(err.message)); }
   }
 
-  async function showDraftFor(chatId) {
+  async function showDraftFor(chatId, scrollToIt) {
     if (!waChat || chatId !== waChat) return;
     try {
       const { items } = await api("/api/held");
@@ -1453,12 +1512,20 @@
         card.prepend(el("div", "wa-kind", "Waiting for you"));
         panel.append(card);
       }
-      if (mine.length) panel.scrollTop = panel.scrollHeight;
+      // Only when a draft has just arrived. On an ordinary refresh this ran
+      // after the scroll position had been carefully restored and threw it
+      // away again, so reading older messages jumped to the bottom every
+      // minute — the exact thing the restore above exists to prevent.
+      if (mine.length && scrollToIt) panel.scrollTop = panel.scrollHeight;
     } catch { /* the Held tab still has it; this is the convenience copy */ }
   }
 
   async function loadWaThread(toBottom) {
     if (!waChat) return;
+    // Without this, a conversation left open after the account is unlinked
+    // shows a bare error with the reply box still inviting a message that
+    // cannot be sent, and nothing polls for the link coming back.
+    if (await showLinkIfNeeded()) return;
     const panel = $("waPanel");
     // A refresh must not yank the view away from whatever is being read.
     const wasAtBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
@@ -1466,7 +1533,10 @@
     try {
       const data = await api(`/api/wa/thread?chat_id=${encodeURIComponent(waChat)}&limit=50`);
       const { chat, messages } = data;
-      $("waWho").textContent = chat.name + groupSuffix(chat);
+      // A name is not guaranteed: an empty chat object from the bridge used
+      // to render the literal string "undefined", and the assistant toggle
+      // then saved a contact called "undefined".
+      $("waWho").textContent = (chat.name || waChat.split("@")[0]) + groupSuffix(chat);
       showAssistantToggle(chat, data.default_mode);
       panel.replaceChildren(...(messages.length
         ? messages.map((m) => waBubble(m, chat.id))
@@ -1475,23 +1545,34 @@
       $("waReply").hidden = chat.is_group;
       if (chat.is_group) panel.append(note("Replying to groups from here is switched off."));
       panel.scrollTop = toBottom || wasAtBottom ? panel.scrollHeight : keep;
-      showDraftFor(waChat);
+      showDraftFor(waChat, false);
     } catch (err) { panel.replaceChildren(note(err.message)); }
   }
 
   async function loadWa(toBottom) {
     if (waBusy) return;          // reading drives the browser session; one at a time
     waBusy = true;
-    try { await (waChat ? loadWaThread(toBottom) : loadWaChats()); }
-    finally { waBusy = false; }
+    try {
+      // Both columns are on screen together now, so both are refreshed. The
+      // list is what makes "back" instant: it never went away, so there is
+      // nothing to fetch on the way back to it.
+      await loadWaChats();
+      if (waChat) await loadWaThread(toBottom);
+    } finally { waBusy = false; }
   }
+
+  // On a narrow screen one column shows at a time; on a wide one both are
+  // visible and this only decides which is emphasised.
+  const waSplit = () => document.querySelector(".wa-split");
 
   function openWa(id, name) {
     waChat = id;
     $("waWho").textContent = name;
     $("waBack").hidden = false;
+    waSplit().dataset.open = "thread";
     $("waPanel").replaceChildren(note("Opening…"));
-    loadWa(true);
+    // Only the thread: the list is already on screen and unchanged.
+    if (!waBusy) { waBusy = true; loadWaThread(true).finally(() => { waBusy = false; }); }
   }
 
   $("waBack").onclick = () => {
@@ -1499,8 +1580,11 @@
     $("waAutoWrap").hidden = true;
     $("waBack").hidden = true;
     $("waReply").hidden = true;
-    $("waWho").textContent = "Your WhatsApp";
-    loadWa();
+    $("waWho").textContent = "Pick a conversation";
+    waSplit().dataset.open = "list";
+    // Instant: the list never went anywhere, so there is nothing to refetch.
+    $("waPanel").replaceChildren(note("Pick a conversation on the right to read it here."));
+    for (const row of $("waList").querySelectorAll(".wa-row")) row.setAttribute("aria-current", "false");
   };
   $("waRefresh").onclick = () => loadWa();
 
@@ -1537,7 +1621,7 @@
     // conversation if that is what you are looking at.
     waStream.addEventListener("draft", (e) => {
       refreshHeld();
-      showDraftFor(chatOf(e));
+      showDraftFor(chatOf(e), true);   // a draft that has just arrived is worth scrolling to
     });
     // EventSource reconnects on its own; this is for the case where it cannot,
     // so the page is not left silently stale.
