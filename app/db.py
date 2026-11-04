@@ -73,10 +73,29 @@ def add_held(chat_id: str, incoming: str, reply: str, reason: str = "",
         return cur.lastrowid
 
 
-def pending() -> list[dict]:
+def pending(limit: int = 50) -> list[dict]:
+    """The replies waiting for the owner, newest first.
+
+    The cap was a hard 50 written into the SQL. That suits a page of cards and
+    defeats anything that wants to see a real backlog whole — grouping fifty
+    drafts by person cannot find the fifty-first — so the caller chooses, within
+    the same bound query_messages() uses.
+    """
     with _db() as c:
-        rows = c.execute("SELECT * FROM held WHERE status = 'pending' ORDER BY id DESC LIMIT 50")
+        rows = c.execute("SELECT * FROM held WHERE status = 'pending' ORDER BY id DESC LIMIT ?",
+                         (max(1, min(limit, 500)),))
         return [dict(r) for r in rows]
+
+
+def pending_count() -> int:
+    """How many replies are waiting, whatever pending() was asked for.
+
+    The Held badge counted the rows pending() returned, so once fifty people
+    were waiting it read "50" and stayed there however far behind the owner
+    fell — the one number that should have told them it was getting worse.
+    """
+    with _db() as c:
+        return c.execute("SELECT COUNT(*) FROM held WHERE status = 'pending'").fetchone()[0]
 
 
 def get(item_id: int) -> dict | None:

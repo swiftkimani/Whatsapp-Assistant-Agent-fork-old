@@ -79,7 +79,7 @@ class DefaultModeRequest(BaseModel):
 
 def _status() -> dict:
     return {"auto_reply": db.auto_reply_enabled(), "direct_send": db.direct_send_enabled(),
-            "self_log": db.self_log_enabled(), "held": len(db.pending())}
+            "self_log": db.self_log_enabled(), "held": db.pending_count()}
 
 
 @router.get("/api/status", dependencies=AUTH)
