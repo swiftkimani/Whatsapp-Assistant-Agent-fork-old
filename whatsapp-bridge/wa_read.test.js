@@ -22,6 +22,7 @@ test("a chat is reduced to what the dashboard shows", () => {
   assert.deepStrictEqual(shapeChats([chat({ unreadCount: 3 })]), [{
     id: "254712345678@c.us", name: "Jane", is_group: false,
     unread: 3, ts: 1200, preview: "niaje", from_me: false, archived: false, pinned: false,
+    left: false, community: false, is_community_parent: false,
   }]);
 });
 
@@ -244,4 +245,158 @@ test("pinned chats sort above more recent ones", () => {
   const out = shapeChats([mk("1@c.us", "recent", { timestamp: 9 }),
                           mk("2@c.us", "pinned", { pinned: true, timestamp: 1 })]);
   assert.deepStrictEqual(out.map((c) => c.name), ["pinned", "recent"]);
+});
+
+// ---- groups the owner is no longer in, and the system messages that say so ----
+//
+// These are the chats that were arriving at the very top of the pane with an
+// empty preview: a group the owner was removed from or left, whose last word
+// was the notice of their going.
+
+const ME = "254733000222@c.us";
+
+const group = (over = {}) => chat({
+  id: { _serialized: "120363000000000001@g.us" },
+  name: "Fam",
+  isGroup: true,
+  groupMetadata: { participants: [{ id: ME }, { id: "254722000111@c.us" }] },
+  ...over,
+});
+
+const notice = (subtype, recipients) => ({
+  timestamp: 9000, type: "gp2", body: "", hasMedia: false, _data: { subtype, recipients },
+});
+
+test("a group the owner is no longer in is marked left and sinks below older live chats", () => {
+  const out = shapeChats([
+    group({ name: "Removed", groupMetadata: { participants: [{ id: "254722000111@c.us" }] },
+            lastMessage: notice("remove", [ME]) }),
+    chat({ name: "Jane", lastMessage: { timestamp: 50, body: "niaje", type: "chat" } }),
+  ], { me: ME });
+  assert.deepStrictEqual(out.map((c) => [c.name, c.left]), [["Jane", false], ["Removed", true]]);
+});
+
+test("a group the owner is still in is not marked left, device suffix and all", () => {
+  // A second linked device writes the same account as "…:12@c.us"; it is the
+  // same person, on whichever side the suffix happens to appear.
+  const [theirs] = shapeChats([group({
+    groupMetadata: { participants: [{ id: "254733000222:12@c.us" }, { id: "254722000111@c.us" }] },
+  })], { me: ME });
+  assert.strictEqual(theirs.left, false);
+
+  const [mine] = shapeChats([group({
+    // A participant id can also arrive as the wid object it was built from.
+    groupMetadata: { participants: [{ id: { _serialized: ME, user: "254733000222", server: "c.us" } }] },
+  })], { me: "254733000222:12@c.us" });
+  assert.strictEqual(mine.left, false);
+});
+
+test("a group with no participant list is not guessed to be left", () => {
+  // An empty list means the metadata never arrived, not that the owner is
+  // gone. Saying they left a group they run is the worse of the two wrongs.
+  for (const metadata of [undefined, {}, { participants: [] }, { participants: null }]) {
+    const [c] = shapeChats([group({ groupMetadata: metadata })], { me: ME });
+    assert.strictEqual(c.left, false, String(JSON.stringify(metadata)));
+  }
+});
+
+test("not knowing who the owner is means no group is called left", () => {
+  const [c] = shapeChats([group({ groupMetadata: { participants: [{ id: "254722000111@c.us" }] } })]);
+  assert.strictEqual(c.left, false);
+});
+
+test("privacy ids and phone numbers are not compared, so neither reads as left", () => {
+  // When toPn cannot map a group's participants they stay as @lid, and the
+  // digits of a lid have nothing to do with the digits of a phone number.
+  const [theirs] = shapeChats([group({
+    groupMetadata: { participants: [{ id: "112257593794569@lid" }, { id: "118800000000001@lid" }] },
+  })], { me: ME });
+  assert.strictEqual(theirs.left, false);
+
+  const [mine] = shapeChats([group({
+    groupMetadata: { participants: [{ id: "254722000111@c.us" }, { id: "254700000000@c.us" }] },
+  })], { me: "112257593794569@lid" });
+  assert.strictEqual(mine.left, false);
+});
+
+test("a group system message says what happened instead of showing blank", () => {
+  const words = (subtype, recipients) => shapeChats(
+    [group({ lastMessage: notice(subtype, recipients) })], { me: ME },
+  )[0].preview;
+  assert.strictEqual(words("remove", [ME]), "You were removed");
+  assert.strictEqual(words("leave", [ME]), "You left");
+  assert.strictEqual(words("add", [ME]), "You were added");
+  assert.strictEqual(words("subject"), "Group name changed");
+  assert.strictEqual(words("picture"), "Group photo changed");
+  assert.strictEqual(words("promote", [ME]), "You are now an admin");
+  // Nothing here knows what a subtype WhatsApp has not shipped yet means.
+  assert.strictEqual(words("something_new", [ME]), "Group update");
+});
+
+test("it only says the owner when the recipients name the owner", () => {
+  const words = (recipients) => shapeChats(
+    [group({ lastMessage: notice("remove", recipients) })], { me: ME },
+  )[0].preview;
+  assert.strictEqual(words([ME]), "You were removed");
+  assert.strictEqual(words(["254722000111@c.us"]), "Someone was removed");
+  assert.strictEqual(words([{ _serialized: ME }]), "You were removed");
+  assert.strictEqual(words(undefined), "Someone was removed");
+  // Without the owner's id there is nothing to check the list against.
+  assert.strictEqual(shapeChats([group({ lastMessage: notice("remove", [ME]) })])[0].preview,
+                     "Someone was removed");
+});
+
+test("a removal reads as a removal inside the thread too", () => {
+  const gp2 = (over) => ({ id: { _serialized: "a" }, timestamp: 1, type: "gp2", body: "", ...over });
+  const kind = (over, opts) => shapeMessages([gp2(over)], opts)[0].kind;
+  assert.strictEqual(kind({ _data: { subtype: "remove", recipients: [ME] } }, { me: ME }),
+                     "You were removed");
+  assert.strictEqual(kind({ _data: { subtype: "add", recipients: ["254722000111@c.us"] } }, { me: ME }),
+                     "Someone was added");
+  assert.strictEqual(kind({ _data: {} }), "Group update");
+});
+
+test("a pinned chat still comes first, against a live chat and a dead group alike", () => {
+  const out = shapeChats([
+    group({ name: "dead", groupMetadata: { participants: [{ id: "254722000111@c.us" }] },
+            lastMessage: { timestamp: 9000, body: "x", type: "chat" } }),
+    chat({ name: "live", lastMessage: { timestamp: 500, body: "x" } }),
+    chat({ id: { _serialized: "254700000000@c.us" }, name: "pinned", pinned: true,
+           lastMessage: { timestamp: 1, body: "x" } }),
+  ], { me: ME });
+  assert.deepStrictEqual(out.map((c) => c.name), ["pinned", "live", "dead"]);
+});
+
+test("the limit is a budget for live chats, and the archived ones still come through", () => {
+  // Capping the whole list spent the budget on chats the dashboard then
+  // hides, so a pane asking for a hundred conversations showed far fewer.
+  const chats = [];
+  for (let i = 1; i <= 4; i += 1) {
+    chats.push(chat({ id: { _serialized: `25470000000${i}@c.us` }, name: `live${i}`,
+                      lastMessage: { timestamp: 100 + i, body: "x" } }));
+    chats.push(chat({ id: { _serialized: `25471000000${i}@c.us` }, name: `old${i}`, archived: true,
+                      lastMessage: { timestamp: 50 + i, body: "x" } }));
+  }
+  const out = shapeChats(chats, { limit: 2, me: ME });
+  assert.deepStrictEqual(out.filter((c) => !c.archived).map((c) => c.name), ["live4", "live3"]);
+  assert.deepStrictEqual(out.filter((c) => c.archived).map((c) => c.name), ["old4", "old3"]);
+  // Live first: the page renders them in the order it is given.
+  assert.deepStrictEqual(out.map((c) => c.archived), [false, false, true, true]);
+});
+
+test("a community's subgroup and its announcement group are reported as such", () => {
+  const made = (extra) => shapeChats(
+    [group({ groupMetadata: { participants: [{ id: ME }], ...extra } })], { me: ME },
+  )[0];
+  const sub = made({ parentGroup: { _serialized: "120363000000000009@g.us" } });
+  assert.deepStrictEqual([sub.community, sub.is_community_parent], [true, false]);
+  const parent = made({ isParentGroup: true });
+  assert.deepStrictEqual([parent.community, parent.is_community_parent], [false, true]);
+  const plain = made({});
+  assert.deepStrictEqual([plain.community, plain.is_community_parent], [false, false]);
+});
+
+test("a direct chat is never a community or a group the owner left", () => {
+  const [c] = shapeChats([chat()], { me: ME });
+  assert.deepStrictEqual([c.left, c.community, c.is_community_parent], [false, false, false]);
 });

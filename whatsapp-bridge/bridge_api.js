@@ -59,6 +59,13 @@ function findEntry(name) {
  *        index.js and read on every request so the answer is never stale
  */
 function startBridgeApi(client, link) {
+  // The owner's own id, so a group they are no longer in can be told apart
+  // from one they are still in, and a removal can read as "you were removed"
+  // rather than "someone was". Absent until the client is linked, and an
+  // empty id simply means those checks stay cautious.
+  const ownId = () => (client.info && client.info.wid
+    ? (client.info.wid._serialized || client.info.wid.$1) : "");
+
   if (started) return;
 
   const token = process.env.BRIDGE_API_TOKEN;
@@ -135,7 +142,7 @@ function startBridgeApi(client, link) {
             console.error("Could not read the blocked list:", err.message);
             return reply(503, { error: "could not read the blocked list" });
           }
-          const chats = shapeChats(await client.getChats(), { limit, blocked });
+          const chats = shapeChats(await client.getChats(), { limit, blocked, me: ownId() });
           console.log(`[read] /chats returned=${chats.length}`);   // no names, numbers or text
           return reply(200, { chats });
         }
@@ -146,7 +153,7 @@ function startBridgeApi(client, link) {
           const limit = Math.min(Number(data.limit) || DEFAULT_MESSAGES, 100);
           const chat = await client.getChatById(chatId);
           if (!chat) return reply(404, { error: "no such chat" });
-          const messages = shapeMessages(await chat.fetchMessages({ limit }), { limit });
+          const messages = shapeMessages(await chat.fetchMessages({ limit }), { limit, me: ownId() });
           console.log(`[read] /thread returned=${messages.length}`);
           return reply(200, {
             chat: { id: chatId, name: shapeChats([chat], { limit: 1 })[0].name, is_group: Boolean(chat.isGroup) },
