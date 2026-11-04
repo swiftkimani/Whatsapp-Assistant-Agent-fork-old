@@ -77,6 +77,26 @@ const puppeteerConfig = {
     "--disable-gpu",
     "--no-first-run",
     "--no-zygote",
+    // V8 decides how large its old space may grow from how much memory the
+    // machine appears to have, and an uncapped container looks like the whole
+    // VPS. So WhatsApp Web's chat store accumulated with nothing ever pressing
+    // GC to run, and the host's monitor reported this container at 3709 MiB.
+    // Bounding the heap makes V8 collect as it approaches the ceiling instead
+    // of asking the kernel for more. 512 MiB is well clear of one account's
+    // live set and is the first number to raise if the renderer starts dying
+    // with "Target closed" — that is what running out of heap looks like here.
+    "--js-flags=--max-old-space-size=512",
+    // Chromium's own background traffic — the component updater, variations,
+    // safe-browsing lists — is work this container should never do: it talks to
+    // web.whatsapp.com and nothing else, and the component updater in
+    // particular downloads and unpacks on a schedule. Page network is
+    // untouched, so WhatsApp Web does not notice.
+    "--disable-background-networking",
+    // --disable-gpu above does not end the story: Chromium falls back to
+    // SwiftShader, a software rasteriser that loads its own library and
+    // allocates its own buffers. WhatsApp Web draws through 2D canvas, which
+    // does not need it. The pair belongs together.
+    "--disable-software-rasterizer",
   ],
 };
 if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -404,7 +424,24 @@ client.on("message", async (msg) => {
           const voiceMedia = new MessageMedia("audio/ogg", data.reply_audio_base64);
           await client.sendMessage(msg.from, voiceMedia, { sendAudioAsVoice: true });
         } else if (text) {
-          await client.sendMessage(msg.from, text);
+          // She decides per message whether the reply needs to show what it
+          // answers — quoting every one is what makes something read as a
+          // bot. ignoreQuoteErrors is spelled out because the library's
+          // default is true: left off, a quote that cannot be attached is
+          // dropped and the bare text goes out anyway, which in a busy group
+          // is a different message from the one she wrote.
+          const quoted = data.quote ? { quotedMessageId: msg.id._serialized,
+                                        ignoreQuoteErrors: false } : {};
+          try {
+            await client.sendMessage(msg.from, text, quoted);
+          } catch (err) {
+            // Only the quote can fail here; the text is still worth sending,
+            // and a reply that never arrives is worse than one without its
+            // quote. Retried once, plainly, and said out loud.
+            if (!data.quote) throw err;
+            console.error("Quoting failed, sending without it:", err.message);
+            await client.sendMessage(msg.from, text);
+          }
         }
       } else if (data.action === "hold") {
         console.log(`Held for approval for ${anon(msg.from)} — check your dashboard.`);

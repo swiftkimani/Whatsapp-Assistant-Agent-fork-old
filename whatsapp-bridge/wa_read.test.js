@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const { shapeChats, shapeMessages } = require("./wa_read");
+const { shapeChats, shapeMessages, MESSAGE_ID } = require("./wa_read");
 
 const chat = (over = {}) => ({
   id: { _serialized: "254712345678@c.us" },
@@ -399,4 +399,160 @@ test("a community's subgroup and its announcement group are reported as such", (
 test("a direct chat is never a community or a group the owner left", () => {
   const [c] = shapeChats([chat()], { me: ME });
   assert.deepStrictEqual([c.left, c.community, c.is_community_parent], [false, false, false]);
+});
+
+
+// ---- replies: the message a message is answering ----
+//
+// The quote is already on the raw message, so these go through _data rather
+// than through the client: reading it any other way is a browser round trip
+// per message, fifty of them to open one thread.
+
+// A reply as it arrives: `quotedMsg` is WhatsApp's serialization of the
+// message being answered, and the fields naming it sit beside the quote.
+const quoting = (quotedMsg, beside = {}, over = {}) =>
+  message({ _data: { quotedMsg, ...beside }, ...over });
+const quoteOf = (quotedMsg, beside, opts) =>
+  shapeMessages([quoting(quotedMsg, beside)], opts)[0].quoted;
+
+test("a reply carries the message it answers, and who wrote it", () => {
+  assert.deepStrictEqual(
+    quoteOf({ type: "chat", body: "can you send it today?" },
+            { quotedStanzaID: "3EB0AA11BB22", quotedParticipant: "254722000111@c.us" },
+            { me: ME }),
+    { id: "", stanza_id: "3EB0AA11BB22", from_me: false,
+      author: "254722000111", preview: "can you send it today?", kind: "" },
+  );
+});
+
+test("a quoted message is the owner's own when WhatsApp names them as its author", () => {
+  // Nothing in the raw quote says whose message it was, so the author it is
+  // attributed to is the only reading there is.
+  const sender = (participant, me) =>
+    quoteOf({ type: "chat", body: "on my way" }, { quotedParticipant: participant }, { me });
+  assert.strictEqual(sender(ME, ME).from_me, true);
+  assert.strictEqual(sender("254722000111@c.us", ME).from_me, false);
+  // A second linked device writes the same account as "…:12@c.us".
+  assert.strictEqual(sender("254733000222:12@c.us", ME).from_me, true);
+  // With nobody to compare against, a quote reads as the other person's: a
+  // quote wrongly labelled the owner's own is the worse of the two wrongs.
+  assert.strictEqual(sender(ME, "").from_me, false);
+  assert.strictEqual(sender("", ME).from_me, false);
+});
+
+test("what the raw quote says about who sent it beats the reading from its author", () => {
+  // The library takes a message's fromMe off its id, so the id is believed
+  // here too, over an author that disagrees with it.
+  const quoted = quoteOf(
+    { type: "chat", body: "I will", id: { fromMe: true, _serialized: "true_254712345678@c.us_3EB0AA11BB22", id: "3EB0AA11BB22" } },
+    { quotedParticipant: "254722000111@c.us" }, { me: ME },
+  );
+  assert.strictEqual(quoted.from_me, true);
+  assert.strictEqual(quoted.id, "true_254712345678@c.us_3EB0AA11BB22");
+  assert.strictEqual(quoted.stanza_id, "3EB0AA11BB22");
+});
+
+test("a quoted photo with no caption is named rather than left blank", () => {
+  // An unnamed quote block is a bubble pointing at nothing, which tells the
+  // owner less than their own thread already did.
+  const photo = quoteOf({ type: "image", directPath: "/v/t62.7118", caption: "" });
+  assert.deepStrictEqual([photo.kind, photo.preview], ["Photo", ""]);
+  assert.strictEqual(quoteOf({ type: "ptt", directPath: "/v/t62.7117" }).kind, "Voice note");
+  // The words of anything carrying a file live in its caption; its body is
+  // not the text the owner typed.
+  const captioned = quoteOf({ type: "image", directPath: "/v/x", caption: "at the shop" });
+  assert.deepStrictEqual([captioned.kind, captioned.preview], ["Photo", "at the shop"]);
+});
+
+test("a quoted message that carries no file is labelled all the same", () => {
+  // These have no directPath, so there is nothing to call media about them,
+  // and they used to arrive as an empty quote.
+  assert.strictEqual(quoteOf({ type: "location" }).kind, "Location");
+  assert.strictEqual(quoteOf({ type: "revoked" }).kind, "Deleted message");
+  assert.strictEqual(quoteOf({ type: "something_new" }).kind, "Attachment");
+});
+
+test("a quoted poll keeps its question, wherever WhatsApp put it", () => {
+  const written = quoteOf({ type: "poll_creation", body: "Lunch at one?" });
+  assert.deepStrictEqual([written.kind, written.preview], ["Poll", "Lunch at one?"]);
+  // A poll's question is not in a body at all when WhatsApp serializes it.
+  assert.strictEqual(quoteOf({ type: "poll_creation", pollName: "Lunch at one?" }).preview,
+                     "Lunch at one?");
+});
+
+test("a quoted contact card is labelled, not dumped as raw vCard text", () => {
+  // A contact card's body *is* the vCard, and the quote block is the next
+  // place that run of syntax would have been rendered as somebody's words.
+  const card = quoteOf({ type: "vcard", body: "BEGIN:VCARD\nVERSION:3.0\nFN:Jane" });
+  assert.strictEqual(card.kind, "Contact card");
+  assert.strictEqual(card.preview, "", "the vCard syntax must not be shown as text");
+});
+
+test("a quote is one clipped line, however long the message it answers was", () => {
+  const long = quoteOf({ type: "chat", body: `x${"y".repeat(400)}\nz` });
+  assert.ok(long.preview.length <= 90 && long.preview.endsWith("…"));
+  assert.ok(!long.preview.includes("\n"), "a quote block is a single line");
+});
+
+test("a message that is not a reply has no quote rather than an empty one", () => {
+  assert.strictEqual(shapeMessages([message()])[0].quoted, null);
+  for (const nothing of [null, undefined, "", 0, false, "BEGIN:VCARD"]) {
+    assert.strictEqual(quoteOf(nothing), null, String(nothing));
+  }
+  assert.strictEqual(shapeMessages([message({ _data: undefined })])[0].quoted, null);
+});
+
+test("a partial quote degrades to what is known instead of throwing", () => {
+  // This runs over every message in every thread, so a key WhatsApp did not
+  // send has to read as nothing to show — one missing field cannot be
+  // allowed to take a whole conversation down with it.
+  for (const partial of [{}, { type: "chat" }, { body: "" }, { type: null, body: null },
+                         { id: null }, { id: "false_254712345678@c.us_3EB0AA11BB22" },
+                         { type: "chat", body: { unexpected: true } }]) {
+    const quoted = quoteOf(partial, {}, { me: ME });
+    assert.strictEqual(quoted.from_me, false, JSON.stringify(partial));
+    assert.strictEqual(quoted.author, "", JSON.stringify(partial));
+    assert.strictEqual(typeof quoted.id, "string", JSON.stringify(partial));
+    assert.strictEqual(typeof quoted.stanza_id, "string", JSON.stringify(partial));
+    assert.strictEqual(typeof quoted.preview, "string", JSON.stringify(partial));
+    assert.strictEqual(typeof quoted.kind, "string", JSON.stringify(partial));
+  }
+  // A quote with nothing in it at all says nothing, rather than guessing at a
+  // label for a message whose type never arrived.
+  assert.deepStrictEqual(quoteOf({}), { id: "", stanza_id: "", from_me: false,
+                                        author: "", preview: "", kind: "" });
+  // An id is reported in whichever form the raw data holds it, and never
+  // assembled out of parts: an invented id names a message that is not there.
+  assert.strictEqual(quoteOf({ id: "false_254712345678@c.us_3EB0AA11BB22" }).id,
+                     "false_254712345678@c.us_3EB0AA11BB22");
+  assert.strictEqual(quoteOf({}, { quotedStanzaID: "3EB0AA11BB22" }).stanza_id, "3EB0AA11BB22");
+});
+
+test("a message id is recognised by its real shape, and junk is refused", () => {
+  // /send-reply hands a quoted id to the browser page to look up, so what is
+  // accepted here is what WhatsApp itself writes and nothing besides.
+  for (const id of [
+    "true_254712345678@c.us_3EB0C767D097F5A2C7C1",
+    "false_254712345678@c.us_3EB0C767D097F5A2C7C1",
+    "false_112257593794569@lid_BAE5A1B2C3D4E5F6",
+    "false_120363000000000001@g.us_3EB0AA11BB22_254722000111@c.us",
+    "true_254700000000-1234567890@g.us_3EB0AA11BB22",   // a group made before the renumbering
+    "false_254712345678:12@c.us_3EB0AA11BB22",          // a second linked device
+    "false_254712345678@c.us_AbC-dEf=",                 // not every client writes hex
+  ]) assert.ok(MESSAGE_ID.test(id), id);
+
+  for (const junk of [
+    "", "nonsense", "undefined",
+    "254712345678@c.us",                                // a chat id, not a message id
+    "maybe_254712345678@c.us_3EB0AA11BB22",             // the owner sent it or did not
+    "true_254712345678@c.us",                           // nothing naming the message
+    "true_@c.us_3EB0AA11BB22",                          // no account in it
+    "true_254712345678@newsletter_3EB0AA11BB22",        // a channel is not a conversation
+    "true_254712345678@c.us_3EB",                       // too short to be a real id
+    "true_254712345678@c.us_3EB0AA11BB22 ",
+    "true_254712345678@c.us_3EB0AA11BB22\n",
+    "true_254712345678@c.us_3EB0AA;rm -rf /",
+    "true_254712345678@c.us_3EB0AA11BB22_254722000111@g.us",   // a group cannot be the author
+    `true_254712345678@c.us_${"A".repeat(200)}`,
+  ]) assert.ok(!MESSAGE_ID.test(junk), JSON.stringify(junk));
 });

@@ -313,8 +313,8 @@
      the one control on screen that belongs to exactly one pane. */
   #view-whatsapp{display:flex;flex-direction:column;min-height:0}
   .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
-  #waReply{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
-  @media (max-width:900px){ #waReply{margin-inline-start:0} }
+  #waReply,.quoting{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
+  @media (max-width:900px){ #waReply,.quoting{margin-inline-start:0} }
   .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
   /* The list leads, as it does in WhatsApp itself, and gets room for a real
      conversation name rather than three truncated words. */
@@ -447,6 +447,29 @@
   .msg .by-ai{margin-inline-start:0;background:var(--primary-fg);color:var(--primary)}
   .msg-foot{display:flex;gap:var(--s2);align-items:center;margin-top:var(--s1)}
   .msg-foot time{margin:0}
+  /* A quote, drawn the way WhatsApp draws one: a bar in the accent colour,
+     who said it, then one line of what they said. */
+  .quote{display:block;margin-bottom:var(--s1);padding:var(--s1) var(--s2);
+         border-inline-start:3px solid var(--primary);border-radius:var(--r-sm);
+         background:var(--surface-raised);font-size:var(--f-sm);line-height:1.35}
+  .quote b{display:block;font-size:var(--f-xs);font-weight:700;color:var(--primary)}
+  .quote span{display:block;color:var(--text-muted);overflow:hidden;
+              text-overflow:ellipsis;white-space:nowrap}
+  /* On the owner's own bubble the accent colour is the background, so the
+     quote borrows the foreground instead of disappearing. */
+  .me .quote{background:rgba(255,255,255,.18);border-inline-start-color:var(--primary-fg)}
+  .me .quote b,.me .quote span{color:inherit;opacity:.85}
+  /* Always there rather than on hover: a control that only exists while a
+     mouse is over it does not exist on a phone at all. */
+  .quote-btn{margin-inline-start:auto;display:grid;place-items:center;flex:none;
+             width:28px;height:28px;padding:0;border:0;border-radius:var(--r-pill);
+             background:transparent;color:inherit;opacity:.55}
+  .quote-btn:hover,.quote-btn:focus-visible{opacity:1;background:var(--surface-raised)}
+  .me .quote-btn:hover,.me .quote-btn:focus-visible{background:rgba(255,255,255,.2)}
+  .quoting{display:flex;gap:var(--s2);align-items:center;margin-top:var(--s2);
+           padding:var(--s2);border:1px solid var(--border);border-radius:var(--r-md);
+           background:var(--surface)}
+  .quoting .quote{flex:1;min-width:0;margin:0;background:transparent}
   .listen{display:inline-block;margin-top:var(--s2);padding:var(--s1) var(--s3);font-size:var(--f-sm);font-weight:500;
           border-radius:var(--r-pill);color:var(--text);border:1px solid var(--border);background:var(--surface)}
   .listen:hover{background:var(--surface-raised)}
@@ -655,6 +678,12 @@
             </form>
         </div>
       </div>
+    </div>
+    <div id="quoting" class="quoting" hidden>
+      <div class="quote">
+        <b id="quotingWho"></b><span id="quotingWhat" dir="auto"></span>
+      </div>
+      <button id="quotingX" class="icon" type="button" aria-label="Don't quote anything"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <form id="waReply" hidden>
       <input id="waText" dir="auto" placeholder="Reply as yourself…" aria-label="Reply as yourself" autocomplete="off">
@@ -1782,8 +1811,53 @@
     held_sent: "AI wrote it · you approved",
   };
 
+  const QUOTE_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h7a9 9 0 0 1 9 9v2"/></svg>';
+
+  /** Who said the message being quoted, in words the owner recognises. The
+   *  bridge can only give us digits: it knows the author's number, not what
+   *  the owner calls them. */
+  function quotedWho(q, chatName) {
+    if (q.from_me) return "You";
+    // In a group WhatsApp names the author, and a number is the most we can
+    // honestly say about them. In a direct chat it names nobody, because
+    // there is only one other person — the one already named at the top.
+    if (q.author) return `+${q.author}`;
+    return chatName || "Them";
+  }
+
+  function quoteBlock(m) {
+    const q = m.quoted;
+    const box = el("div", "quote");
+    const who = el("b", "", quotedWho(q, $("waWho").textContent));
+    const what = el("span", "", q.kind && q.preview ? `${q.kind} · ${q.preview}`
+                                : q.kind || q.preview || "Message");
+    what.dir = "auto";
+    box.append(who, what);
+    return box;
+  }
+
+  // Which message the next reply will quote, if any.
+  let quoting = null;
+
+  function startQuoting(m) {
+    quoting = m;
+    $("quotingWho").textContent = m.from_me ? "You" : ($("waWho").textContent || "Them");
+    $("quotingWhat").textContent = m.body || m.kind || "Message";
+    $("quoting").hidden = false;
+    $("waText").focus();
+  }
+
+  function stopQuoting() {
+    quoting = null;
+    $("quoting").hidden = true;
+  }
+  $("quotingX").onclick = () => { stopQuoting(); $("waText").focus(); };
+
   function waBubble(m, chatId) {
     const bubble = el("div", `msg ${m.from_me ? "me" : "bot"}`);
+    // The quote comes first, as it does in WhatsApp: it is the context for
+    // everything under it.
+    if (m.quoted) bubble.append(quoteBlock(m));
     if (m.kind) bubble.append(el("strong", "wa-kind", m.kind));
     if (m.body) {
       const body = el("div", "", m.body);
@@ -1836,6 +1910,12 @@
     // typed on the phone unless it is said here.
     if (SENT_BY[m.sent_by]) foot.append(el("span", "by-ai", SENT_BY[m.sent_by]));
     foot.append(stamp);
+    const pick = btn("", "quote-btn");
+    pick.innerHTML = QUOTE_ICON;
+    pick.title = "Reply to this message";
+    pick.setAttribute("aria-label", "Reply to this message, quoting it");
+    pick.onclick = () => startQuoting(m);
+    foot.append(pick);
     bubble.append(foot);
     return bubble;
   }
@@ -1979,6 +2059,7 @@
     waChat = null;
     $("waWho").textContent = ASSISTANT_NAME;
     $("waWhoFace").replaceChildren(avatar(ASSISTANT_NAME));
+    stopQuoting();
     $("waAutoWrap").hidden = true;
     $("waReply").hidden = true;
     $("waPanel").hidden = true;
@@ -2170,6 +2251,9 @@
     $("waPanel").hidden = false;
     $("waWho").textContent = name;
     $("waWhoFace").replaceChildren(avatar(name, id));
+    // Picked in another conversation, it would quote a message this one has
+    // never seen. The bridge refuses that, but it should never get there.
+    stopQuoting();
     $("waBack").hidden = false;
     markOpenRow(id);
     waSplit().dataset.open = "thread";
@@ -2205,6 +2289,7 @@
     $("waReply").hidden = true;
     $("waWho").textContent = "Pick a conversation";
     $("waWhoFace").replaceChildren();
+    stopQuoting();
     waSplit().dataset.open = "list";
     // Instant: the list never went anywhere, so there is nothing to refetch.
     $("waPanel").replaceChildren(waPickEmpty);
@@ -2335,8 +2420,12 @@
     const submit = e.submitter || $("waReply").querySelector("button");
     submit.disabled = true;
     try {
-      await api("/api/wa/reply", { chat_id: waChat, text });
+      await api("/api/wa/reply", {
+        chat_id: waChat, text,
+        quoted_msg_id: (quoting && quoting.id) || "",
+      });
       box.value = "";
+      stopQuoting();
       await loadWaThread(true);
     } catch (err) {
       $("waPanel").append(note(err.message));

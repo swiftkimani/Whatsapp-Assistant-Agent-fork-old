@@ -22,6 +22,17 @@ const DEFAULT_MESSAGES = 50;
 // the pane — the conversations were simply missing, with nothing to show why.
 const CHAT_ID = /^\d[\d:-]*@(c\.us|lid|g\.us)$/;
 
+// What a message id looks like. WhatsApp builds one out of whether the owner
+// sent it, the chat it belongs to, WhatsApp's own id for the message, and —
+// for a message somebody else sent in a group — who sent it:
+// "true_254712345678@c.us_3EB0…", "false_…@g.us_…_254722000111@c.us".
+// Here beside CHAT_ID because it exists for the same reason: /send-reply hands
+// a quoted id to the browser page to look up, and a page is no place to send
+// whatever string a request happened to carry. The id of the message itself is
+// not plain hex everywhere — other clients write base64-ish ids — so the
+// characters allowed there are wider than the ids this machine happens to see.
+const MESSAGE_ID = /^(?:true|false)_\d[\d:-]*@(?:c\.us|lid|g\.us)_[A-Za-z0-9=-]{4,128}(?:_\d[\d:-]*@(?:c\.us|lid))?$/;
+
 // What the dashboard can render itself, and in which element. Anything not
 // here keeps its written label: a document or a contact card is a file, not
 // something to show inline, and guessing at one would break the layout.
@@ -166,6 +177,70 @@ function groupEvent(msg, me) {
 }
 
 /**
+ * The message a reply is answering, or null when this one is not a reply.
+ *
+ * Read straight off the raw serialized message, where the quote already is:
+ * the library's own `hasQuotedMsg` is nothing more than a test for
+ * `_data.quotedMsg`. Asking the library for the quoted message instead goes
+ * through the browser page, which is one round trip per message — fifty of
+ * them to open a single thread.
+ *
+ * What is read here is WhatsApp's own serialization rather than a shape the
+ * library promises, so every field is treated as optional: a key that is not
+ * there means there is nothing to show, never a thrown error halfway down a
+ * thread the owner was only trying to read.
+ */
+function quotedOf(msg, me) {
+  const data = (msg && msg._data) || {};
+  const quoted = data.quotedMsg;
+  if (!quoted || typeof quoted !== "object") return null;
+
+  const type = String(quoted.type || "");
+  const qid = (quoted.id && typeof quoted.id === "object") ? quoted.id : {};
+  // The library computes a message's hasMedia rather than finding it — a
+  // message has a file when WhatsApp gave a path to fetch it from — and the
+  // quote is that same raw data, so it has no hasMedia of its own to read.
+  const hasMedia = Boolean(quoted.directPath);
+  // Which field holds the words is the library's rule too: the caption for
+  // anything carrying a file, otherwise the body, with a poll's question and
+  // an event's name standing in for the body neither of those has.
+  const said = hasMedia ? quoted.caption : (quoted.body || quoted.pollName || quoted.eventName);
+  // Who wrote it is named beside the quote and not inside it: WhatsApp puts
+  // the quoted author in the replying message's own context, under a key of
+  // its own, because a quote has no `author` field the way a message does.
+  const who = data.quotedParticipant || quoted.participant || quoted.author || "";
+  // Whether it was the owner's own message. The library reads this off a
+  // message's id, where fromMe is the authority, so the id is asked first and
+  // a flag beside it second. With neither stated, the only reading left is
+  // whether the author is the owner — which answers "not the owner" when
+  // there is no author to compare, and a quote shown as the other person's is
+  // the harmless way to be wrong about this.
+  const stated = [qid.fromMe, quoted.fromMe].find((f) => typeof f === "boolean");
+
+  return {
+    // Two ways to name the quoted message, so the dashboard can find it in a
+    // thread it has already loaded: the serialized id, when the quote carries
+    // one, and WhatsApp's own id for the message, which arrives beside the
+    // quote. Neither is built out of the other — a serialized id assembled
+    // from parts would name a message that does not exist, which is worse
+    // than an empty string the dashboard can test for.
+    id: typeof quoted.id === "string" ? quoted.id : String(qid._serialized || qid.$1 || ""),
+    stanza_id: String(data.quotedStanzaID || qid.id || ""),
+    from_me: typeof stated === "boolean" ? stated : sameAccount(who, me),
+    author: idParts(who).user,
+    // A contact card's body is the raw vCard — BEGIN:VCARD VERSION:3.0 … —
+    // and a quote block is exactly where that run of syntax would land next.
+    preview: UNDOWNLOADABLE.has(type) && type !== "poll_creation"
+      ? "" : clip(said, PREVIEW_CHARS),
+    // Named when it has no words of its own, as the message itself is, so a
+    // quoted voice note reads as a voice note instead of as a blank line.
+    kind: (hasMedia || UNDOWNLOADABLE.has(type)
+           || (!String(said || "").trim() && type && type !== "chat"))
+      ? mediaLabel(type) : "",
+  };
+}
+
+/**
  * @param {object} [opts]
  * @param {Set<string>} [opts.blocked] ids the owner has blocked. Their chats
  *        stay in WhatsApp's own list, so without this they appear here as
@@ -285,6 +360,10 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "" } = {}) {
       // still that has to be clicked.
       is_gif: Boolean(msg.isGif),
       forwarded: Boolean(msg.isForwarded),
+      // The message this one is answering, so a reply reads as a reply rather
+      // than as an answer to nothing in particular — which is how a thread of
+      // one-word agreements reads with the quotes stripped out of it.
+      quoted: quotedOf(msg, me),
     }))
     .sort((a, b) => a.ts - b.ts)   // oldest first: a thread reads downwards
     .slice(-Math.max(1, limit));
@@ -293,5 +372,5 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "" } = {}) {
 module.exports = {
   shapeChats, shapeMessages, mediaLabel, chatName, renderAs,
   idParts, sameAccount, hasLeftGroup, groupEvent,
-  CHAT_ID, DEFAULT_CHATS, DEFAULT_MESSAGES,
+  CHAT_ID, MESSAGE_ID, DEFAULT_CHATS, DEFAULT_MESSAGES,
 };

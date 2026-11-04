@@ -7,7 +7,8 @@ const http = require("http");
 const path = require("path");
 const { Location } = require("whatsapp-web.js");
 const { mergeContacts, DEFAULT_LIMIT } = require("./contacts_sync");
-const { shapeChats, shapeMessages, CHAT_ID, DEFAULT_CHATS, DEFAULT_MESSAGES } = require("./wa_read");
+const { shapeChats, shapeMessages, CHAT_ID, MESSAGE_ID, DEFAULT_CHATS,
+  DEFAULT_MESSAGES } = require("./wa_read");
 const { qrToSvg } = require("./qr_svg");
 
 // Project root by default; CONTACTS_FILE moves it so the backend and the bridge
@@ -23,6 +24,11 @@ const NEEDS_LINK = ROUTES.filter((r) => r !== "/link-status");
 // reply. Past this it is not worth holding in memory on either side.
 const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
 let started = false; // "ready" can fire again after a reconnect
+
+// The digits an id names, with neither the "@c.us" namespace nor the ":12" a
+// second linked device adds. Two ids that have to be compared are compared on
+// this, never whole.
+const local = (id) => String(id || "").split("@")[0].split(":")[0];
 
 // Re-read on every request so edits to contacts.json apply without a restart.
 function readContacts() {
@@ -190,7 +196,6 @@ function startBridgeApi(client, link) {
           // session cannot be used to read media out of a conversation the
           // caller did not name. Compared on the numeric local part, because
           // the same conversation is addressed as both @lid and @c.us.
-          const local = (id) => String(id || "").split("@")[0].split(":")[0];
           const from = (msg.id && msg.id.remote) || msg.from || "";
           if (local(from) !== local(chatId)) {
             return refuse("different_chat", `asked=${local(chatId)} is=${local(from)}`);
@@ -261,14 +266,58 @@ function startBridgeApi(client, link) {
           // chats are refused outright.
           const chatId = String(data.chat_id || "");
           const text = String(data.text || "").trim();
+          // Which earlier message this answers, when the owner picked one.
+          const quotedId = String(data.quoted_msg_id || "");
           // No hyphen here on purpose: that is what keeps groups out, which
           // the dashboard promises and the held queue depends on.
           if (!/^\d[\d:]*@(c\.us|lid)$/.test(chatId)) return reply(400, { error: "bad chat id" });
           if (!text || text.length > 4000) return reply(400, { error: "bad text" });
+          // Checked rather than passed through, for the reason chat_id is:
+          // this id is handed to the browser page to look up, and the page is
+          // the one place a request's own string must never reach unexamined.
+          if (quotedId && !MESSAGE_ID.test(quotedId)) return reply(400, { error: "bad quoted id" });
+          // A quote carries the quoted words into the conversation, so an id
+          // from another chat would copy one person's message into somebody
+          // else's thread. The same check /media makes, on the same local
+          // part, because one conversation is addressed as both @lid and
+          // @c.us. Refused rather than dropped: a reply that quietly loses
+          // its quote is not the message the owner wrote.
+          if (quotedId && local(quotedId.split("_")[1]) !== local(chatId)) {
+            return reply(400, { error: "quoted message is from another chat" });
+          }
           if (!(await client.getChatById(chatId))) return reply(404, { error: "no such chat" });
-          await client.sendMessage(chatId, text);
+          // ignoreQuoteErrors is true unless it is said to be false, and what
+          // it ignores is the page failing to find the quoted message: the
+          // text then goes out with the quote silently stripped off it. In a
+          // busy thread that is a different message from the one the owner
+          // wrote — they answered something specific — so the failure is
+          // surfaced instead and they can decide what to send.
+          const options = quotedId
+            ? { quotedMessageId: quotedId, ignoreQuoteErrors: false } : {};
+          let sent;
+          try {
+            sent = await client.sendMessage(chatId, text, options);
+          } catch (err) {
+            // Utils.js throws a bare Error("Could not get the quoted
+            // message.") from inside the page, and it arrives wrapped in
+            // puppeteer's own "Evaluation failed" wording — page internals,
+            // which is not something to hand the dashboard as a 500. Nothing
+            // was sent in this case: the throw happens while the message is
+            // still being assembled.
+            if (quotedId && /quoted message/i.test(String(err.message || ""))) {
+              return reply(404, { error: "quoted message not found" });
+            }
+            throw err;
+          }
           console.log("[send] /send-reply");
-          return reply(200, { status: "sent" });
+          // The id of what was just sent, so the backend can tie its own
+          // record of this reply to the message now in the thread. Empty if
+          // WhatsApp returned no message for it, which the caller has to
+          // allow for — there is nothing here that could invent one.
+          return reply(200, {
+            status: "sent",
+            msg_id: (sent && sent.id && (sent.id._serialized || sent.id.$1)) || "",
+          });
         }
 
         if (req.url === "/sync-contacts") {

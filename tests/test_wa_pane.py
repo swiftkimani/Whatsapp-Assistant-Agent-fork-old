@@ -116,7 +116,8 @@ def test_a_group_can_be_read_but_not_answered(signed_in, bridge):
 def test_a_reply_is_sent_and_recorded_in_the_message_log(signed_in, bridge, fresh_db):
     r = signed_in.post("/api/wa/reply", json={"chat_id": "254712345678@c.us", "text": "niaje, nakuja"})
     assert r.status_code == 200 and r.json() == {"status": "sent"}
-    assert bridge.calls[0]["payload"] == {"chat_id": "254712345678@c.us", "text": "niaje, nakuja"}
+    assert bridge.calls[0]["payload"] == {
+        "chat_id": "254712345678@c.us", "text": "niaje, nakuja", "quoted_msg_id": ""}
     logged = db.query_messages(None, None, None, "out", 10)
     assert [(m["direction"], m["body"]) for m in logged] == [("out", "niaje, nakuja")]
 
@@ -247,3 +248,38 @@ def test_a_classic_group_can_report_that_it_moved(client):
 def test_something_that_is_not_a_conversation_still_cannot_ping(client):
     for chat_id in ["status@broadcast", "abc@newsletter", "", "../../etc/passwd"]:
         assert client.post("/wa-event", json={"chat_id": chat_id}, headers={"x-bridge-token": "bridge-secret"}).status_code == 422
+
+
+def test_a_reply_can_quote_a_message_in_the_same_conversation(signed_in, bridge, fresh_db):
+    quoted = "false_254712345678@c.us_3EB0AA11BB22"
+    r = signed_in.post("/api/wa/reply", json={
+        "chat_id": "254712345678@c.us", "text": "saa nne", "quoted_msg_id": quoted})
+    assert r.status_code == 200
+    assert bridge.calls[0]["payload"]["quoted_msg_id"] == quoted
+
+
+@pytest.mark.parametrize("quoted", [
+    "not-an-id",
+    "254712345678@c.us",                       # a chat id is not a message id
+    "maybe_254712345678@c.us_3EB0AA11BB22",    # only true_/false_ exist
+    "false_254712345678@c.us_3EB0AA11BB22; rm -rf /",
+    "false_254712345678@c.us_\n3EB0AA11BB22",
+])
+def test_a_quoted_id_that_is_not_one_is_refused_before_the_bridge(signed_in, bridge, quoted):
+    """A quote carries the quoted text into the conversation, so an id that
+    came from anywhere but a real message must not reach the page."""
+    r = signed_in.post("/api/wa/reply", json={
+        "chat_id": "254712345678@c.us", "text": "hi", "quoted_msg_id": quoted})
+    assert r.status_code == 422
+    assert bridge.calls == []
+
+
+def test_a_quote_that_cannot_be_found_says_so_in_its_own_words(signed_in, bridge, fresh_db):
+    """The bridge answers 404 for two different missing things, and sending
+    the owner to look for the wrong one wastes their time."""
+    bridge.replies["/send-reply"] = (404, {"error": "quoted message not found"})
+    r = signed_in.post("/api/wa/reply", json={
+        "chat_id": "254712345678@c.us", "text": "hi",
+        "quoted_msg_id": "false_254712345678@c.us_3EB0AA11BB22"})
+    assert r.status_code == 404
+    assert "quoted" in r.json()["detail"].lower()

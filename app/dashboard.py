@@ -359,9 +359,17 @@ DIRECT_CHAT_ID = r"^\d+@(c\.us|lid)$"          # one person
 ANY_CHAT_ID = r"^\d[\d:-]*@(c\.us|lid|g\.us)$"       # or a group
 
 
+# A WhatsApp message id, for replying to one in particular. The bridge checks
+# it again — against its own pattern and against the conversation it belongs
+# to — because a quote carries the quoted text into the chat, so an id from
+# somewhere else would copy one person's words into another person's thread.
+MESSAGE_ID = r"^(true|false)_\d[\d:-]*@(c\.us|lid|g\.us)_[A-Za-z0-9=-]{4,128}(_\d[\d:-]*@(c\.us|lid))?$"
+
+
 class ReplyRequest(BaseModel):
     chat_id: str = Field(pattern=DIRECT_CHAT_ID)
     text: str = Field(min_length=1, max_length=4000)
+    quoted_msg_id: str = Field(default="", pattern=rf"^$|{MESSAGE_ID[1:-1]}$")
 
 
 async def _bridge_read(path: str, payload: dict, timeout: float) -> dict:
@@ -700,6 +708,11 @@ async def wa_reply(body: ReplyRequest):
 
     r = await _bridge_post("/send-reply", body.model_dump(), timeout=30)
     if r.status_code == 404:
+        # Two different things are missing at 404 here, and sending the owner
+        # to look for the wrong one wastes their time.
+        detail = ((r.json() or {}).get("error") or "") if r.headers.get("content-type", "").startswith("application/json") else ""
+        if "quoted" in detail:
+            raise HTTPException(404, "That message is not in this conversation any more, so it could not be quoted. Send it without the quote?")
         raise HTTPException(404, "That conversation is not on WhatsApp any more.")
     if r.status_code != 200:
         raise HTTPException(502, f"The bridge could not send it ({r.status_code}): {r.text[:120]}")
