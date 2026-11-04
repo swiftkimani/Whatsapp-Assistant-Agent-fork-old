@@ -1,5 +1,5 @@
 # CONTEXT — WhatsApp Assistant Agent
-_Last updated: 2026-11-03_
+_Last updated: 2026-11-04_
 
 ## Current goal
 Get the system running on this machine, with replies coming from the Claude API
@@ -12,8 +12,8 @@ instead of OpenAI.
 | Bridge deps | ✅ | installed with `PUPPETEER_SKIP_DOWNLOAD=true`, uses system Chrome |
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
-| Test suite | ✅ | 218 pytest + 54 `node --test` pass, 0 fail |
-| Dashboard UI | ✅ | rebuilt on design tokens; live (deployment `98ce06d`) |
+| Test suite | ✅ | 242 pytest + 93 `node --test` pass, 0 fail |
+| Dashboard UI | ✅ | chrome moved into a profile sheet; phone-app layout on mobile (`ab3dfb1`, **not yet deployed**) |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
@@ -22,6 +22,44 @@ instead of OpenAI.
 | Replies going out | ⬜ | **the notes are still empty — this is the one blocker** |
 
 ## Done
+- **2026-11-04 — the dashboard's permanent chrome moved into a profile sheet.**
+  On a 712px-tall screen the top bar, the list title row and two rows of
+  wrapped filter pills took about forty percent of the height before a single
+  conversation drew: three were visible. None of those controls is touched
+  more than twice a day. They now live behind **You** at the foot of the rail,
+  where WhatsApp keeps its own profile, as settings rows with the reason
+  written beside each one — the old pills carried theirs in `title`
+  attributes, which a touchscreen cannot show at all. Ten conversations fit.
+  - Whether she is replying by herself is said twice on purpose: a word in the
+    rail, and a bar across the top whenever it is paused. A coloured dot is
+    not a sentence, and the rail has no room for one on a phone.
+  - On a phone the layout follows the **phone app**, not the web one: five
+    equally sized destinations, each named, the open one marked by a pill that
+    fades in; Activity and Notes move into the sheet because five is the
+    ceiling; the bar disappears inside a conversation; and opening one pushes
+    a history entry, so the phone's own back gesture returns to the list.
+    `window.history` is spelled out at those call sites because `history` is
+    taken in that scope by the assistant's own transcript.
+  - Every tab carries an `aria-label`: the labels are hidden by CSS on narrow
+    screens, which takes them out of the accessibility tree as well, so the
+    icon-only tabs had no name at all.
+  - Verified by running it: both themes, 1382px and 390px, against a stub
+    bridge in `scratchpad/stub/`. Not yet verified against the live bridge.
+- **2026-11-04 — held replies group by the person.** Fifty cards in one list is
+  not a queue anyone can work. `GET /api/held/by-contact` groups them by
+  conversation, newest first, with a count. The held badge had also stopped
+  counting at fifty, because it was the length of a query with `LIMIT 50` in
+  it. **The dashboard does not render the grouped endpoint yet.**
+- **2026-11-04 — groups you left no longer rank first.** A group system
+  message becomes the chat's last message, with no notification filter, so a
+  group you were removed from won on timestamp and showed an empty preview.
+  The preview now says what happened, and says it was *you* only when the
+  notification's recipient list names you. Membership comes from the
+  participant list: `isReadOnly` is overwritten with the group's `announce`
+  flag, so on a group it answers a different question. The limit was also
+  being spent on archived chats the pane then hid.
+  - Unit-tested against fixtures only — the live bridge was not running, so
+    none of this has been seen against real WhatsApp data.
 - Ported replies and Arianna from OpenAI to the Claude Messages API:
   - `app/llm.py` — `anthropic.Anthropic()`; the three-field answer is now enforced
     by structured outputs (`output_config.format` + `ANSWER_SCHEMA`) instead of
