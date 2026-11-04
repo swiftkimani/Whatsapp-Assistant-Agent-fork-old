@@ -163,17 +163,42 @@ function startBridgeApi(client, link) {
           const msgId = String(data.msg_id || "");
           if (!CHAT_ID.test(chatId) || !msgId) return reply(400, { error: "bad request" });
 
-          const msg = await client.getMessageById(msgId);
-          if (!msg) return reply(404, { error: "no such message" });
+          // Every branch below says which one it was. These used to return a
+          // bare 404 with nothing logged, so "the media does not show" was
+          // indistinguishable from "the message is not here", "this device
+          // never had the file" and "WhatsApp has expired it".
+          const refuse = (reason, detail) => {
+            console.log(`[read] /media refused reason=${reason}${detail ? ` ${detail}` : ""}`);
+            return reply(404, { error: reason });
+          };
+
+          let msg;
+          try {
+            msg = await client.getMessageById(msgId);
+          } catch (err) {
+            return refuse("lookup_failed", err.message);
+          }
+          if (!msg) return refuse("no_such_message");
           // The id names the message; the chat is checked so that holding a
           // session cannot be used to read media out of a conversation the
-          // caller did not name.
+          // caller did not name. Compared on the numeric local part, because
+          // the same conversation is addressed as both @lid and @c.us.
+          const local = (id) => String(id || "").split("@")[0].split(":")[0];
           const from = (msg.id && msg.id.remote) || msg.from || "";
-          if (String(from) !== chatId) return reply(404, { error: "no such message" });
-          if (!msg.hasMedia) return reply(404, { error: "no media" });
+          if (local(from) !== local(chatId)) {
+            return refuse("different_chat", `asked=${local(chatId)} is=${local(from)}`);
+          }
+          if (!msg.hasMedia) return refuse("no_media", `type=${msg.type}`);
 
-          const media = await msg.downloadMedia();
-          if (!media || !media.data) return reply(404, { error: "media is gone" });
+          let media;
+          try {
+            media = await msg.downloadMedia();
+          } catch (err) {
+            // The usual cause: this device linked after the message was sent,
+            // so it never held the file, and WhatsApp has since expired it.
+            return refuse("download_failed", err.message);
+          }
+          if (!media || !media.data) return refuse("not_on_this_device", `type=${msg.type}`);
           // WhatsApp drops media from its servers after a while, and an old
           // message in an open thread is exactly when that shows up.
           const bytes = Math.ceil((media.data.length * 3) / 4);

@@ -32,12 +32,36 @@ def time_bounds(label: str, now: datetime | None = None) -> tuple[float | None, 
     return None, None
 
 
+def _readable_who(chat_id: str, stored: str, book: dict[str, str]) -> str:
+    """Who this was with, in words the owner recognises.
+
+    The fallback used to be the chat id's local part. For a phone number that
+    is merely unfriendly; for a privacy id it is fifteen opaque digits that
+    match nothing the owner has ever seen, and for a group it is the group id.
+    """
+    if stored:
+        return stored
+    name = contacts.name_for(chat_id, book=book)
+    if name:
+        return name
+    if not chat_id:
+        return "From this dashboard"
+    if chat_id.endswith("@g.us"):
+        return "A group"
+    if chat_id.endswith("@lid"):
+        return "Unknown contact"
+    digits = chat_id.split("@")[0].split(":")[0]
+    return f"+{digits}" if digits.isdigit() else "Unknown contact"
+
+
 def find_messages(contact: str | None, period: str, direction: str, limit: int = 100) -> list[dict]:
     """Plain database query: no model involved, so listing messages costs no tokens."""
     since, until = time_bounds(period)
     rows = db.query_messages(contact, since, until, {"received": "in", "sent": "out"}.get(direction), limit)
+    book = contacts.load()      # read once for the whole page, not per row
     return [{"ts": r["ts"], "direction": r["direction"], "body": r["body"], "outcome": r["outcome"],
-             "name": r["name"] or (r["chat_id"].split("@")[0] if r["chat_id"] else "")} for r in rows]
+             "chat_id": r["chat_id"] or "",
+             "name": _readable_who(r["chat_id"] or "", r["name"] or "", book)} for r in rows]
 
 
 class ToggleRequest(BaseModel):

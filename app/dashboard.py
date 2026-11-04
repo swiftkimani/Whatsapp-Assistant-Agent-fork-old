@@ -569,7 +569,22 @@ async def wa_media(chat_id: str = Query(pattern=ANY_CHAT_ID), msg_id: str = Quer
     """
     r = await _bridge_post("/media", {"chat_id": chat_id, "msg_id": msg_id}, timeout=120)
     if r.status_code == 404:
-        raise HTTPException(404, "That attachment is no longer on WhatsApp.")
+        # Say which of these it was. One sentence for all of them sent the
+        # owner looking for a message that is still on their phone.
+        reasons = {
+            "no_such_message": "This device does not have that message.",
+            "different_chat": "That attachment belongs to another conversation.",
+            "no_media": "That message has no attachment.",
+            "not_on_this_device": "The file was never downloaded to this device, "
+                                  "and WhatsApp no longer has it. Open it on your phone.",
+            "download_failed": "WhatsApp would not hand over that file.",
+            "lookup_failed": "That message could not be read.",
+        }
+        try:
+            reason = (r.json() or {}).get("error", "")
+        except ValueError:
+            reason = ""
+        raise HTTPException(404, reasons.get(reason, "That attachment could not be fetched."))
     if r.status_code == 413:
         raise HTTPException(413, "That attachment is too large to show here.")
     if r.status_code != 200:

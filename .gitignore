@@ -9,3 +9,6 @@ __pycache__/
 # All of data/: the database, your notes, the style index and the runtime log.
 # It is personal content and this repository is public.
 data/
+
+# macOS drops these when text is pasted into a Finder window
+*.textClipping

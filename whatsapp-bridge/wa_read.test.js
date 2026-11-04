@@ -212,7 +212,8 @@ test("types that carry no file are still labelled", () => {
   // These have no directPath, so hasMedia is false and they arrived with no
   // label at all — an empty bubble reading "(no text)".
   for (const [type, label] of [["location", "Location"], ["revoked", "Deleted message"],
-                               ["multi_vcard", "Attachment"]]) {
+                               ["multi_vcard", "Contact cards"], ["ptt", "Voice note"],
+                               ["call_log", "Call"]]) {
     const [m] = shapeMessages([{ id: { _serialized: "a" }, timestamp: 1, type }]);
     assert.strictEqual(m.kind, label, type);
   }

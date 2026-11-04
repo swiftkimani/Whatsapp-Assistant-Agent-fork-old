@@ -73,10 +73,26 @@ def test_a_renderable_type_is_shown_in_place_and_anything_else_is_a_download(sig
     assert r.headers["content-type"].startswith("application/octet-stream")
 
 
-def test_an_attachment_whatsapp_has_dropped_says_so(signed_in, bridge):
-    bridge.replies["/media"] = (404, {"error": "media is gone"})
-    r = signed_in.get(media_url())
-    assert r.status_code == 404 and "no longer on WhatsApp" in r.json()["detail"]
+def test_each_reason_an_attachment_fails_says_something_different(signed_in, bridge):
+    """One sentence for all of them sent the owner looking for a message that
+    was still on their phone. The commonest cause is that this device linked
+    after the message was sent, so it never held the file."""
+    cases = {
+        "not_on_this_device": "never downloaded to this device",
+        "no_such_message": "does not have that message",
+        "different_chat": "another conversation",
+        "no_media": "no attachment",
+    }
+    for reason, expected in cases.items():
+        bridge.replies["/media"] = (404, {"error": reason})
+        r = signed_in.get(media_url())
+        assert r.status_code == 404, reason
+        assert expected in r.json()["detail"], f"{reason}: {r.json()['detail']}"
+
+
+def test_an_unrecognised_reason_still_says_something_true(signed_in, bridge):
+    bridge.replies["/media"] = (404, {"error": "something new"})
+    assert "could not be fetched" in signed_in.get(media_url()).json()["detail"]
 
 
 def test_something_too_large_is_refused_rather_than_held_in_memory(signed_in, bridge):

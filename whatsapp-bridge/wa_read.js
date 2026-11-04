@@ -39,7 +39,9 @@ function mediaLabel(type) {
   return {
     image: "Photo", video: "Video", sticker: "Sticker", document: "Document",
     audio: "Audio", ptt: "Voice note", location: "Location", vcard: "Contact card",
-    poll_creation: "Poll", revoked: "Deleted message",
+    multi_vcard: "Contact cards", poll_creation: "Poll", revoked: "Deleted message",
+    call_log: "Call", ciphertext: "Waiting for this message", album: "Album",
+    e2e_notification: "Security code changed", gp2: "Group update",
   }[type] || "Attachment";
 }
 
@@ -118,7 +120,16 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES } = {}) {
       // — which was being rendered as the message text.
       body: UNDOWNLOADABLE.has(msg.type) && msg.type !== "poll_creation"
         ? "" : clipBody(msg.body, BODY_CHARS),
-      kind: (msg.hasMedia || UNDOWNLOADABLE.has(msg.type)) ? mediaLabel(msg.type) : "",
+      // Anything with no words of its own gets named. A bubble reading
+      // "(no text)" tells the owner nothing — a voice note should say it is a
+      // voice note whether or not its file can be fetched.
+      // Anything with no words of its own gets named, so a voice note says it
+      // is a voice note whether or not its file can be fetched. A plain text
+      // message that is genuinely empty is left alone — calling that an
+      // attachment would be a worse lie than saying nothing.
+      kind: (msg.hasMedia || UNDOWNLOADABLE.has(msg.type)
+             || (!String(msg.body || "").trim() && msg.type && msg.type !== "chat"))
+        ? mediaLabel(msg.type) : "",
       has_media: Boolean(msg.hasMedia),
       // The raw type decides the element; the label above is the words.
       media_type: msg.hasMedia ? String(msg.type || "") : "",

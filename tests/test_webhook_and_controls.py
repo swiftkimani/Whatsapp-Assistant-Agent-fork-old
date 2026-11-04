@@ -53,8 +53,10 @@ def test_someone_not_in_your_contacts_is_answered_under_anyone(signed_in, agent,
     stranger = msg(**{"from": "254799999999@c.us", "number": "254799999999"})
     assert client_action(signed_in, stranger) == "send"
     items = signed_in.get("/api/messages").json()["items"]
+    # Shown as a number you could dial, not a bare chat-id local part — and
+    # never a privacy id or a group id, which mean nothing to the owner.
     assert [(m["direction"], m["name"]) for m in items] == [
-        ("out", "254799999999"), ("in", "254799999999")]
+        ("out", "+254799999999"), ("in", "+254799999999")]
 
 
 def test_anyone_does_not_override_a_mode_you_set_for_one_person(signed_in, agent, monkeypatch):
@@ -177,3 +179,17 @@ def test_a_nonsense_default_is_refused(signed_in):
 
 def test_setting_the_default_needs_the_password(client):
     assert client.post("/api/default-mode", json={"mode": "auto"}).status_code == 401
+
+
+def test_a_conversation_is_named_in_words_the_owner_recognises(signed_in, agent, fresh_db):
+    """The fallback used to print the chat id's local part. For a privacy id
+    that is fifteen opaque digits matching nothing the owner has ever seen."""
+    from app.controls import _readable_who
+
+    book = {"Kawira": "254712345678"}
+    assert _readable_who("254712345678@c.us", "", book) == "Kawira"      # known
+    assert _readable_who("254799999999@c.us", "", book) == "+254799999999"
+    assert _readable_who("112257593794569@lid", "", book) == "Unknown contact"
+    assert _readable_who("120363111122223333@g.us", "", book) == "A group"
+    assert _readable_who("", "", book) == "From this dashboard"
+    assert _readable_who("254799999999@c.us", "Otieno", book) == "Otieno"  # stored wins
