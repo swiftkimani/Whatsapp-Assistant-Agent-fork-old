@@ -181,5 +181,17 @@ def test_a_bridge_that_errors_is_reported_as_unlinked_rather_than_crashing(signe
     assert r["reachable"] is True and r["linked"] is False
 
 
+def test_the_pairing_code_travels_to_the_page_too(signed_in, link_bridge):
+    """Scanning needs a second screen. Someone reading the dashboard on the
+    same phone they would scan with has only the typed code."""
+    link_bridge.reply = (200, {"linked": False, "qr_svg": None, "code": "191PTKGY"})
+    assert signed_in.get("/api/wa/link").json()["code"] == "191PTKGY"
+
+
+def test_a_linked_account_offers_no_code_to_reuse(signed_in, link_bridge):
+    link_bridge.reply = (200, {"linked": True, "qr_svg": None, "code": None})
+    assert signed_in.get("/api/wa/link").json()["code"] is None
+
+
 def test_the_link_status_needs_a_session(client, link_bridge):
     assert client.get("/api/wa/link").status_code == 401

@@ -133,9 +133,12 @@ let pairingBlockedUntil = 0;
 // the API, which reads it on every request. A server has nowhere to show a QR
 // — the terminal art in these logs rotates every twenty seconds and cannot be
 // scanned off a log viewer — so the dashboard shows it instead.
-const link = { linked: false, qr: null, error: null, stage: "starting" };
+const link = { linked: false, qr: null, code: null, error: null, stage: "starting" };
 
 function announcePairingCode(code) {
+  // Kept for the dashboard as well as the log: a code printed only here is a
+  // code somebody has to go and find, and it expires in about three minutes.
+  link.code = code;
   const line = "=".repeat(54);
   console.log(`\n${line}\n  PAIRING CODE: ${code}\n  On your phone: WhatsApp > Linked devices >\n  "Link with phone number instead", then type this code.\n${line}\n`);
 }
@@ -205,6 +208,7 @@ client.on("ready", () => {
   console.log(`WhatsApp bridge is ready. ECHO_ONLY = ${ECHO_ONLY} linked=${anon(me)}`);
   link.linked = true;
   link.qr = null;              // nothing left to scan
+  link.code = null;
   link.stage = "linked";
   link.error = null;
   pairingAttempts = 0;

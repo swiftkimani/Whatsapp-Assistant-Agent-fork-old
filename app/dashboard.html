@@ -215,6 +215,11 @@
   .link-panel h2{margin:0;font-size:var(--f-lg)}
   .link-panel ol{margin:0;padding-inline-start:var(--s4);text-align:start;color:var(--text-muted);
                  font-size:var(--f-sm);line-height:1.7}
+  .link-or{display:flex;align-items:center;gap:var(--s3);width:100%;color:var(--text-muted);font-size:var(--f-sm)}
+  .link-or::before,.link-or::after{content:"";flex:1;height:1px;background:var(--border)}
+  .link-code{font:600 var(--f-xl)/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+             letter-spacing:.18em;padding:var(--s2) var(--s3);border-radius:var(--r-sm);
+             background:var(--surface-raised);border:1px solid var(--border);user-select:all}
 
   /* media in a thread */
   .media-slot{margin-top:var(--s2)}
@@ -1376,6 +1381,18 @@
         steps.append(el("li", "", step));
       }
       wrap.append(steps, note("The code changes every few seconds. This one refreshes by itself."));
+    }
+    // The eight-character alternative, for when the dashboard is open on the
+    // same phone you would otherwise be scanning with — you cannot point a
+    // camera at the screen holding it.
+    if (state.code) {
+      wrap.append(el("div", "link-or", "or link by phone number"));
+      const code = el("div", "link-code", state.code);
+      code.setAttribute("aria-label", `Pairing code ${state.code.split("").join(" ")}`);
+      wrap.append(code,
+        note("On your phone: Linked devices, then “Link with phone number instead”, and type this."));
+    }
+    if (!state.qr_svg && !state.code) {
     } else {
       wrap.append(note(state.stage ? `Waiting for a code from WhatsApp — ${state.stage}` : "Waiting for a code from WhatsApp…"));
     }

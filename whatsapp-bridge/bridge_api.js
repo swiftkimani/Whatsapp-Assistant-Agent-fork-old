@@ -94,6 +94,9 @@ function startBridgeApi(client, link) {
       return reply(200, {
         linked: Boolean(link.linked),
         qr_svg: qr,
+        // The eight-character alternative to scanning, for linking from the
+        // same device the dashboard is open on.
+        code: link.linked ? null : (link.code || null),
         // What the bridge is doing, and why the last attempt failed, so the
         // owner is not left guessing whether their scan even arrived.
         stage: link.stage || "",

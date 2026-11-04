@@ -465,6 +465,7 @@ async def wa_link():
         "reachable": True,
         "linked": bool(body.get("linked")),
         "qr_svg": body.get("qr_svg"),
+        "code": body.get("code"),
         "stage": body.get("stage") or "",
         "error": body.get("error"),
     }
