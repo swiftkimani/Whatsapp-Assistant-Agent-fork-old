@@ -50,7 +50,7 @@
   h1,h2{line-height:1.2}
   /* One width for every tab. It used to widen only while Chat and WhatsApp
      were side by side, so the whole page jumped as you moved between tabs. */
-  #app{width:100%;max-width:780px;height:100%;display:flex;flex-direction:column;gap:var(--s3);padding:var(--s4)}
+  #app{width:100%;max-width:780px;height:100%;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3)}
   @media (min-width:1024px){ #app{max-width:1240px} }
   button,input,select,textarea{font:inherit;color:var(--text)}
   input,select,textarea{padding:var(--s2) var(--s3);background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)}
@@ -95,7 +95,7 @@
      text 1200px wide is unreadable. */
   #notesPanel textarea,#view-notes .note,#view-notes .noteh{max-width:72ch}
   .addrow label{max-width:320px}
-  .panel{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s4);
+  .panel{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);
          background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
   .note{margin:0;color:var(--text-muted);font-size:var(--f-sm)}
   .filters{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
@@ -149,7 +149,13 @@
   /* The conversation on the left, the list on the right, both always there.
      The list used to be replaced by the thread, so every "back" was a round
      trip to fetch chats that had never changed. */
+  /* The whole view is a column: the two panes, then the reply bar sitting
+     under the conversation only — it used to span the list as well, which is
+     the one control on screen that belongs to exactly one pane. */
+  #view-whatsapp{display:flex;flex-direction:column;min-height:0}
   .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
+  #waReply{margin-inline-start:calc(clamp(300px,30%,400px) + var(--s3))}
+  @media (max-width:900px){ #waReply{margin-inline-start:0} }
   .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
   /* The list leads, as it does in WhatsApp itself, and gets room for a real
      conversation name rather than three truncated words. */
@@ -166,11 +172,19 @@
     .wa-split[data-open="thread"] .wa-list-col{display:none}
     .wa-list-col{flex:none}
   }
-  .wa-draft{margin-top:var(--s3);border-inline-start:3px solid var(--warning)}
-  .wa-draft .wa-kind{color:var(--warning)}
+  /* A draft waiting on you is the one thing on this screen that needs doing,
+     so it does not look like another message. */
+  .wa-draft{margin-top:var(--s3);border:1px solid var(--warning);
+            border-inline-start-width:4px;background:var(--surface-raised)}
+  .wa-draft .wa-kind{color:var(--warning);text-transform:uppercase;letter-spacing:.06em}
 
   /* chat */
-  .msg{max-width:88%;padding:var(--s2) var(--s3);border:1px solid var(--border);border-radius:var(--r-md);white-space:pre-wrap}
+  /* Tighter rows mean more of the conversation on screen, which is the whole
+     point of the panel. Five more messages fit than before. */
+  .msg{max-width:88%;padding:var(--s1) var(--s3);border:1px solid var(--border);
+       border-radius:var(--r-md);white-space:pre-wrap;line-height:1.4}
+  .msg time{margin-top:0}
+  .wa-row{padding-block:var(--s1)}
   .me{align-self:flex-end;background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   .bot{align-self:flex-start;background:var(--surface-raised)}
   .err{color:var(--danger)}

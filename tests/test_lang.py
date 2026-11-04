@@ -22,6 +22,16 @@ def test_swahili_is_recognised_from_the_words_alone():
     assert looks_swahili("manze traffic ni noma leo")
 
 
+def test_english_words_that_look_swahili_do_not_decide_it():
+    """"pole", "leo", "sasa" and "nani" are ordinary English words or names,
+    and one of them used to be enough to read a whole English message as
+    Swahili — which answered it in the wrong voice."""
+    assert not looks_swahili("the north pole trip got cancelled")
+    assert not looks_swahili("pole vault practice is at 4")
+    assert not looks_swahili("leo will call you later")
+    assert not looks_swahili("sure sawa that works for me")
+
+
 def test_plain_english_is_not_mistaken_for_swahili():
     assert not looks_swahili("are you coming tomorrow")
     assert not looks_swahili("let me check and tell you")

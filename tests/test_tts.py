@@ -8,7 +8,12 @@ def test_swahili_gets_the_swahili_voice_and_english_gets_kenyan_english(monkeypa
     monkeypatch.delenv("DASHBOARD_VOICE_EN", raising=False)
     assert pick_voice("niaje uko wapi") == "sw-KE-ZuriNeural"
     assert pick_voice("on my way") == "en-KE-AsiliaNeural"
-    assert pick_voice("sawa ok") == "sw-KE-ZuriNeural"        # one Swahili word is enough
+    # "sawa" and "poa" sit inside ordinary English sentences here, and the
+    # assistant writes them itself, so one of them is not evidence of Swahili.
+    # This used to assert the opposite and locked in an English reply being
+    # read aloud by the Swahili voice.
+    assert pick_voice("sure sawa that works for me") == "en-KE-AsiliaNeural"
+    assert pick_voice("sawa nitakuambia baadaye") == "sw-KE-ZuriNeural"
 
 
 def test_voice_can_be_overridden(monkeypatch):
