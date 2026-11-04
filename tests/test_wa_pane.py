@@ -283,3 +283,35 @@ def test_a_quote_that_cannot_be_found_says_so_in_its_own_words(signed_in, bridge
         "quoted_msg_id": "false_254712345678@c.us_3EB0AA11BB22"})
     assert r.status_code == 404
     assert "quoted" in r.json()["detail"].lower()
+
+
+def test_a_chat_can_be_set_to_draft_and_wait_rather_than_only_on_or_off(signed_in, bridge, fresh_db):
+    """On or off was never the whole question: on meant either answering by
+    herself or writing the reply and waiting, and those are different things
+    to agree to for one person."""
+    for mode in ("auto", "hold", "ignore"):
+        r = signed_in.post("/api/wa/assistant", json={
+            "chat_id": "254712345678@c.us", "name": "Jane", "mode": mode})
+        assert r.status_code == 200, r.text
+        assert r.json()["assistant"]["mode"] == mode
+
+
+def test_the_older_on_off_shape_still_works(signed_in, bridge, fresh_db):
+    """A page cached from before the three-way choice must not start failing."""
+    r = signed_in.post("/api/wa/assistant", json={
+        "chat_id": "254712345678@c.us", "name": "Jane", "enabled": True})
+    assert r.status_code == 200
+    assert r.json()["assistant"]["mode"] == "auto"
+
+
+def test_a_request_that_says_nothing_is_refused(signed_in, bridge, fresh_db):
+    """Quietly picking a setting for somebody is worse than refusing."""
+    r = signed_in.post("/api/wa/assistant", json={
+        "chat_id": "254712345678@c.us", "name": "Jane"})
+    assert r.status_code == 400
+
+
+def test_a_mode_that_is_not_one_of_the_three_is_refused(signed_in, bridge, fresh_db):
+    r = signed_in.post("/api/wa/assistant", json={
+        "chat_id": "254712345678@c.us", "name": "Jane", "mode": "send_everything"})
+    assert r.status_code == 422

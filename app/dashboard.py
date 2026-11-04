@@ -510,8 +510,16 @@ async def wa_link():
 
 
 @router.get("/api/wa/chats", dependencies=[Depends(require_auth)])
-async def wa_chats(limit: int = Query(25, ge=1, le=100)):
-    """Recent conversations, most recently active first."""
+async def wa_chats(limit: int = Query(25, ge=1, le=600)):
+    """Recent conversations, most recently active first.
+
+    The ceiling used to be 100, which is why the pane never showed a whole
+    account: this phone has something over three hundred conversations, so a
+    hundred of them was all anyone could ask for and the rest simply were not
+    there. Raising it costs almost nothing, because the bridge already reads
+    every chat out of the page on each call — the limit only decides how many
+    of them are shaped and sent on, never how many are fetched.
+    """
     data = await _bridge_read("/chats", {"limit": limit}, timeout=60)
     _assistant_states(data.get("chats", []))
     data["default_mode"] = db.default_mode()
@@ -538,7 +546,12 @@ async def wa_thread(chat_id: str = Query(pattern=ANY_CHAT_ID), limit: int = Quer
 class AssistantForChatRequest(BaseModel):
     chat_id: str = Field(pattern=ANY_CHAT_ID)
     name: str = Field(default="", max_length=60)
-    enabled: bool
+    # "on or off" was never the whole question: on means either answering by
+    # herself or writing a draft and waiting, and those are very different
+    # things to agree to for one person. `enabled` is still accepted so an
+    # older page keeps working, and means the same as mode="auto"/"hold".
+    mode: Literal["auto", "hold", "ignore"] | None = None
+    enabled: bool | None = None
 
 
 @router.post("/api/wa/assistant", dependencies=[Depends(require_auth)])
@@ -558,7 +571,9 @@ async def set_assistant_for_chat(body: AssistantForChatRequest):
     except ValueError as err:
         raise HTTPException(400, str(err))
 
-    mode = "auto" if body.enabled else "hold"
+    if body.mode is None and body.enabled is None:
+        raise HTTPException(400, "Say what the assistant should do with this chat.")
+    mode = body.mode or ("auto" if body.enabled else "hold")
     db.set_mode(name, mode)
     db.log("mode_changed", f"{name}: {mode}")
     log_event("mode_changed", mode=mode)   # no name or number in logs

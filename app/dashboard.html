@@ -52,6 +52,13 @@
     --e1:0 1px 2px rgba(0,0,0,.4); --e2:0 4px 12px rgba(0,0,0,.5);
   }
   *{box-sizing:border-box}
+  /* Nothing here is wider than its column. A board that scrolls sideways
+     hides half of itself behind an edge nobody thinks to drag, so the few
+     things that can overflow — a long unbroken link, a pasted id — wrap or
+     clip instead. */
+  html,body{overflow-x:hidden}
+  .panel{overflow-x:hidden}
+  .msg,.wa-prev,.wa-name,.draft,.note{overflow-wrap:anywhere}
   [hidden]{display:none !important}
   body{margin:0;height:100vh;height:100dvh;display:flex;justify-content:center;
        color:var(--text);background:var(--bg);
@@ -296,10 +303,14 @@
   .wa-kind{display:block;font-size:var(--f-xs);font-weight:600;color:var(--text-muted);margin-bottom:var(--s1)}
   .msg time{display:block;margin-top:var(--s1);font-size:var(--f-xs);color:var(--text-muted)}
   .me time{color:inherit;opacity:.75}
-  .waauto{display:flex;flex:none;gap:var(--s2);align-items:center;font-size:var(--f-xs);
-          font-weight:600;color:var(--text-muted);white-space:nowrap;cursor:pointer;
-          padding:2px var(--s2);border:1px solid var(--border);border-radius:var(--r-pill)}
-  .waauto.on{border-color:var(--primary)}
+  .waauto{display:flex;flex:none;align-items:center}
+  /* Three states, named, in one control. A checkbox could only ever say two
+     of them, so "she writes it and waits for you" — the safe middle — had no
+     way to be chosen for one person. */
+  .ai-pick{flex:none;width:auto;padding:2px var(--s2);font-size:var(--f-xs);font-weight:600;
+           border-radius:var(--r-pill);background:var(--surface);color:var(--text-muted)}
+  .ai-pick[data-agreed="auto"]{color:var(--primary);border-color:var(--primary)}
+  .ai-pick[data-agreed="ignore"]{opacity:.65}
   #waAutoNote{margin:0}
   .waauto input{width:auto;padding:0;accent-color:var(--primary)}
   .waauto.on{color:var(--primary)}
@@ -638,10 +649,7 @@
           <button id="waBack" class="icon" type="button" hidden aria-label="Back to conversations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
           <span id="waWhoFace"></span>
           <strong id="waWho" class="wa-who" dir="auto">Pick a conversation</strong>
-          <label id="waAutoWrap" class="waauto" hidden>
-            <input id="waAuto" type="checkbox">
-            <span id="waAutoLabel">AI on</span>
-          </label>
+          <span id="waAutoWrap" class="waauto" hidden></span>
         </div>
         <!-- Why she is answering this person, said once under the header
              rather than squeezed into it. Only when it is not your own
@@ -1518,7 +1526,25 @@
     const chev = el("span", "chev");
     chev.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
     head.append(avatar(g.name || g.from, g.chat_id), main,
-                el("span", "count", String(g.count)), chev);
+                el("span", "count", String(g.count)));
+    // A draft is about a conversation, and reading the rest of it is usually
+    // the thing you need before deciding. This was two tabs and a search away.
+    if (g.chat_id) {
+      const open = btn("", "icon");
+      open.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg>';
+      open.title = "Open this conversation";
+      open.setAttribute("aria-label", `Open the conversation with ${g.name || g.from}`);
+      // Inside a <summary>, a click is the fold's click too unless it is
+      // stopped — opening the chat would also open the drawer behind it.
+      open.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        show("whatsapp");
+        openWa(g.chat_id, g.name || g.from);
+      };
+      head.append(open);
+    }
+    head.append(chev);
     const body = el("div", "heldbody");
     body.append(...g.items.map(heldCard));
     box.append(head, body);
@@ -1545,14 +1571,35 @@
 
   // ---- activity ----
   const who = (a) => a.name || a.target || "someone";
+  // Every kind of entry, in words. A kind with no entry here used to fall
+  // through to its own key — so the feed read "self_log_toggled" and
+  // "default_mode_changed" at the owner, which is the code's vocabulary, not
+  // theirs. The fallback now makes a sentence of it rather than printing a
+  // name only this file was ever meant to see.
   const ACTIVITY = {
     auto_reply: (a) => `Replied automatically to ${who(a)}`,
     held: (a) => `Held a reply to ${who(a)} for your approval`,
     held_sent: (a) => `You sent a held reply to ${who(a)}`,
     held_dismissed: () => "You dismissed a held reply",
-    auto_reply_toggled: (a) => `Auto-reply turned ${a.target}`,
-    direct_send_toggled: (a) => `Direct send turned ${a.target}`,
-    mode_changed: (a) => `Contact setting changed: ${a.target}`,
+    auto_reply_toggled: (a) => a.target === "on"
+      ? "You let her reply by herself again" : "You paused her replying by herself",
+    direct_send_toggled: (a) => a.target === "on"
+      ? "You let messages you ask for go straight out" : "You asked to confirm before anything goes out",
+    self_log_toggled: (a) => a.target === "on"
+      ? "You turned on copying her replies to your own chat" : "You turned off copying her replies to you",
+    default_mode_changed: (a) => `Anyone you have not chosen now gets: ${MODES[a.target] || a.target}`,
+    mode_changed: (a) => {
+      // Stored as "name: mode", because the audit row has one target field.
+      const cut = String(a.target || "").lastIndexOf(":");
+      if (cut < 0) return `Contact setting changed: ${a.target}`;
+      const name = a.target.slice(0, cut).trim();
+      const mode = a.target.slice(cut + 1).trim();
+      return `${name}: ${MODES[mode] || mode}`;
+    },
+  };
+  const sentence = (kind) => {
+    const words = String(kind || "").replace(/_/g, " ").trim();
+    return words ? words[0].toUpperCase() + words.slice(1) : "Something happened";
   };
   async function loadActivity() {
     const list = $("activityList");
@@ -1561,7 +1608,7 @@
       list.replaceChildren(...(items.length ? items.map((a) => {
         const row = el("div", "draft");
         row.dataset.kind = a.kind;
-        const what = el("div", "", (ACTIVITY[a.kind] || (() => a.kind))(a));
+        const what = el("div", "", (ACTIVITY[a.kind] || (() => sentence(a.kind)))(a));
         what.dir = "auto";
         row.append(el("div", "from", new Date(a.ts * 1000).toLocaleString()), what);
         return row;
@@ -1714,10 +1761,46 @@
   const unreadLabel = (n) => (n > 99 ? "99+" : String(n));
 
   /** Turn the assistant on or off for one chat, from wherever it was asked. */
-  async function setAssistantFor(chatId, name, enabled) {
-    const r = await api("/api/wa/assistant", { chat_id: chatId, name, enabled });
+  async function setAssistantFor(chatId, name, mode) {
+    const r = await api("/api/wa/assistant", { chat_id: chatId, name, mode });
     loadContacts();
     return r.assistant;
+  }
+
+  // "On or off" was never the whole question. On means either answering by
+  // herself or writing the reply and waiting — very different things to agree
+  // to for one person, and the database has always held all three.
+  const AI_CHOICES = [
+    ["auto", "Direct"],
+    ["hold", "Ask me"],
+    ["ignore", "Off"],
+  ];
+
+  /** The three-way choice for one conversation. Remembers what the server last
+   *  agreed to, so a refusal puts the control back rather than leaving it
+   *  showing a setting that was never saved. */
+  function aiPicker(mode, label, onPick) {
+    const sel = el("select", "ai-pick");
+    for (const [value, text] of AI_CHOICES) {
+      const option = el("option", "", text);
+      option.value = value;
+      sel.append(option);
+    }
+    sel.value = AI_CHOICES.some(([v]) => v === mode) ? mode : "hold";
+    sel.dataset.agreed = sel.value;
+    sel.setAttribute("aria-label", label);
+    sel.onchange = async () => {
+      const chosen = sel.value;
+      sel.disabled = true;
+      try {
+        await onPick(chosen);
+        sel.dataset.agreed = chosen;
+      } catch (err) {
+        sel.value = sel.dataset.agreed;
+        bubble("bot", err.message, true);
+      } finally { sel.disabled = false; }
+    };
+    return sel;
   }
 
   function waChatRow(c) {
@@ -1744,26 +1827,11 @@
 
     const state = c.assistant || {};
     if (state.can_choose) {
-      const wrap = el("label", "wa-ai" + (state.auto ? " on" : ""));
-      const box = el("input");
-      box.type = "checkbox";
-      box.checked = Boolean(state.auto);
-      box.setAttribute("aria-label", `Let the assistant reply to ${c.name}`);
-      const label = el("span", "", state.auto ? "AI on" : "AI off");
-      box.onchange = async () => {
-        box.disabled = true;
-        try {
-          const now = await setAssistantFor(c.id, c.name, box.checked);
-          wrap.classList.toggle("on", now.auto);
-          label.textContent = now.auto ? "AI on" : "AI off";
+      row.append(aiPicker(state.mode, `What the assistant does with ${c.name}`,
+        async (mode) => {
+          const now = await setAssistantFor(c.id, c.name, mode);
           if (c.id === waChat) showAssistantToggle({ ...c, assistant: now }, state.mode);
-        } catch (err) {
-          box.checked = !box.checked;
-          bubble("bot", err.message, true);
-        } finally { box.disabled = false; }
-      };
-      wrap.append(box, label);
-      row.append(wrap);
+        }));
     } else {
       row.append(el("span", "wa-ai muted", "no replies to groups"));
     }
@@ -1927,41 +1995,27 @@
   let waAssistant = null;
 
   function showAssistantToggle(chat, defaultMode) {
-    const wrap = $("waAutoWrap"), box = $("waAuto"), label = $("waAutoLabel");
+    const wrap = $("waAutoWrap");
     const state = (chat && chat.assistant) || null;
     waAssistant = state;
     wrap.hidden = !state || !state.can_choose;
-    if (wrap.hidden) return;
-    box.checked = state.auto;
-    wrap.classList.toggle("on", state.auto);
+    if (wrap.hidden) { wrap.replaceChildren(); return; }
+    wrap.replaceChildren(aiPicker(state.mode,
+      "What the assistant does with this conversation",
+      async (mode) => {
+        waAssistant = await setAssistantFor(
+          waChat, $("waWho").textContent.replace(/ · (group|community|you left)$/, ""), mode);
+        // It is a decision now, so the line about following a default goes.
+        $("waAutoNote").hidden = true;
+        loadWaChats();
+      }));
     // "Chosen" and "happens to match the default" look identical until the
     // default changes, so the difference is spelled out rather than implied.
-    label.textContent = state.auto ? "AI on" : "AI off";
     const note_ = $("waAutoNote");
     note_.hidden = Boolean(state.chosen);
     note_.textContent = state.chosen ? ""
       : `Following your default: ${MODES[defaultMode] || defaultMode}.`;
   }
-
-  $("waAuto").onchange = async () => {
-    const box = $("waAuto");
-    if (!waChat) return;
-    box.disabled = true;
-    try {
-      const r = await api("/api/wa/assistant", {
-        chat_id: waChat, name: $("waWho").textContent.replace(/ · group$/, ""), enabled: box.checked,
-      });
-      waAssistant = r.assistant;
-      $("waAutoWrap").classList.toggle("on", r.assistant.auto);
-      $("waAutoLabel").textContent = r.assistant.auto ? "AI on" : "AI off";
-      // It is a decision now, so the line about following a default is gone.
-      $("waAutoNote").hidden = true;
-      loadContacts();
-    } catch (err) {
-      box.checked = !box.checked;
-      bubble("bot", err.message, true);
-    } finally { box.disabled = false; }
-  };
 
   // Linking. A server cannot show a QR of its own, so it is drawn here and
   // scanned off this screen. WhatsApp rotates the code about every twenty
@@ -2149,9 +2203,10 @@
     if (await showLinkIfNeeded()) return;
     try {
       // 25 was the bridge's own default and showed a fraction of a real
-      // account. Reading chats drives the browser session, so this is a
-      // trade of a slower first load for a list that is actually usable.
-      const { chats } = await api("/api/wa/chats?limit=100");
+      // account; 100 was still less than a third of this phone's. The bridge
+      // reads every chat out of the page either way, so asking for more of
+      // them costs a larger response and nothing else.
+      const { chats } = await api("/api/wa/chats?limit=400");
       const unread = chats.reduce((n, c) => n + c.unread, 0);
       const badge = $("waUnread");
       badge.textContent = unreadLabel(unread);
