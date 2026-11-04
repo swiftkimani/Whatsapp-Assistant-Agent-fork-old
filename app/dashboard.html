@@ -105,10 +105,20 @@
 
   /* WhatsApp list */
   .wa-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--f-md);font-weight:600}
-  .wa-row{display:flex;gap:var(--s3);align-items:center;width:100%;padding:var(--s2) var(--s3);
+  .wa-row{display:flex;flex-direction:column;gap:var(--s1);width:100%;padding:var(--s2) var(--s3);
           border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);
           text-align:start;font:inherit;color:inherit;transition:background var(--d-fast) var(--ease)}
   .wa-row:hover{background:var(--surface-raised)}
+  .wa-openrow{display:flex;gap:var(--s3);align-items:center;width:100%;padding:0;border:0;
+              background:transparent;text-align:start;font:inherit;color:inherit}
+  /* The AI switch lives on the row, so a whole list can be set without
+     opening a single conversation. */
+  .wa-ai{display:inline-flex;align-items:center;gap:var(--s2);align-self:flex-start;
+         font-size:var(--f-xs);font-weight:600;color:var(--text-muted);cursor:pointer;
+         padding:2px var(--s2);border-radius:var(--r-pill);border:1px solid var(--border)}
+  .wa-ai input{width:auto;padding:0;margin:0;accent-color:var(--primary)}
+  .wa-ai.on{color:var(--primary);border-color:var(--primary)}
+  .wa-ai.muted{cursor:default;opacity:.7}
   .wa-row[aria-current="true"]{border-color:var(--primary);background:var(--primary-weak)}
   .wa-main{min-width:0;flex:1}
   .wa-name{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1254,8 +1264,21 @@
   };
   const groupSuffix = (c) => (c.is_group ? " · group" : "");
 
+  /** Turn the assistant on or off for one chat, from wherever it was asked. */
+  async function setAssistantFor(chatId, name, enabled) {
+    const r = await api("/api/wa/assistant", { chat_id: chatId, name, enabled });
+    loadContacts();
+    return r.assistant;
+  }
+
   function waChatRow(c) {
-    const row = btn("", "wa-row");
+    // A row, not a button: it carries its own AI switch, and a control inside
+    // a button is neither valid nor reachable by keyboard. Choosing who the
+    // assistant answers used to mean opening each conversation in turn.
+    const row = el("div", "wa-row");
+    row.setAttribute("aria-current", String(c.id === waChat));
+
+    const open = btn("", "wa-openrow");
     const main = el("div", "wa-main");
     const name = el("span", "wa-name", c.name + groupSuffix(c));
     const preview = el("span", "wa-prev", (c.from_me ? "You: " : "") + (c.preview || "—"));
@@ -1263,11 +1286,37 @@
     main.append(name, preview);
     const side = el("div", "wa-side");
     side.append(el("span", "wa-when", c.ts ? when(c.ts) : ""));
-    if (c.assistant && c.assistant.auto) side.append(el("span", "wa-auto", "Assistant replies"));
     if (c.unread) side.append(el("span", "badge", String(c.unread)));
-    row.append(avatar(c.name, c.id), main, side);
-    row.setAttribute("aria-current", String(c.id === waChat));
-    row.onclick = () => openWa(c.id, c.name);
+    open.append(avatar(c.name, c.id), main, side);
+    open.onclick = () => openWa(c.id, c.name);
+    open.setAttribute("aria-label", `Open the conversation with ${c.name}`);
+    row.append(open);
+
+    const state = c.assistant || {};
+    if (state.can_choose) {
+      const wrap = el("label", "wa-ai" + (state.auto ? " on" : ""));
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = Boolean(state.auto);
+      box.setAttribute("aria-label", `Let the assistant reply to ${c.name}`);
+      const label = el("span", "", state.auto ? "AI replies" : "AI off");
+      box.onchange = async () => {
+        box.disabled = true;
+        try {
+          const now = await setAssistantFor(c.id, c.name, box.checked);
+          wrap.classList.toggle("on", now.auto);
+          label.textContent = now.auto ? "AI replies" : "AI off";
+          if (c.id === waChat) showAssistantToggle({ ...c, assistant: now }, state.mode);
+        } catch (err) {
+          box.checked = !box.checked;
+          bubble("bot", err.message, true);
+        } finally { box.disabled = false; }
+      };
+      wrap.append(box, label);
+      row.append(wrap);
+    } else {
+      row.append(el("span", "wa-ai muted", "no replies to groups"));
+    }
     return row;
   }
 
