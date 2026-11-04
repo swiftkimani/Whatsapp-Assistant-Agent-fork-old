@@ -568,7 +568,7 @@ deep in swap is slow at everything, and that is the likeliest reason
 `/api/wa/chats` took 3.4 seconds. What changed:
 
 - **`docker-compose.yaml` now sets `deploy.resources` on both services**:
-  backend 2560m / 1.5 cpus with a 1 GiB reservation, bridge 2048m / 1.5 cpus
+  backend 3072m / 1.5 cpus with a 1 GiB reservation, bridge 3072m / 2 cpus
   with a 512 MiB reservation. The reasoning for each number is written beside
   it in the file. Compose v2 applies `deploy.resources.limits` on a non-Swarm
   engine, which is how Coolify deploys; if `docker inspect` shows
@@ -613,7 +613,7 @@ and are not a fault.
 
 Not verified: none of these numbers was measured on the VPS. The 610 MiB and
 250 MiB figures are from loading the same pinned versions locally; the bridge's
-2048m is the reasoned one and the first to raise if the kernel starts killing
+3072m is the reasoned one and the first to raise if the kernel starts killing
 it (an OOM kill there costs a WhatsApp re-sync from the saved session, not a
 re-link).
 
@@ -723,3 +723,70 @@ Tests: `pip install -r requirements-dev.txt && pytest -q`
 - Chrome 156 at `/Applications/Google Chrome.app`; ffmpeg present.
 - `anthropic==2.3.0`. It needs `httpx2`, which coexists with the pinned
   `httpx==0.27.2` that `app/dashboard.py` uses — different package names.
+
+## The models are loaded on demand now, and dropped when idle (2026-11-04)
+
+Follow-up to *Resource limits, and where the memory actually goes* above: the
+limits capped the symptom, this reduces the need. Only `app/stt.py` and
+`app/vision.py` changed, plus the new `tests/test_lazy_models.py`.
+
+- **Nothing heavy is imported until something uses it.** `faster_whisper` now
+  loads inside `_load_model`, `transformers` inside `vision._acquire`, and
+  Pillow inside `caption_base64_image`. Both modules start with
+  `from __future__ import annotations`, which is the part that actually makes
+  it stick: `_models: dict[str, WhisperModel]` is a module-level annotation and
+  those are evaluated at import time, so naming the class there would have
+  imported the library again — as would the next annotation anyone adds.
+  Measured with a subprocess that imports `app.agent_graph` (macOS, peak RSS):
+  **305.6 MiB → 124.4 MiB**, and `faster_whisper`, `transformers`, `torch` and
+  `ctranslate2` are all absent from `sys.modules` afterwards. A test asserts
+  that absence, in a subprocess, so it cannot quietly come back.
+- **A model idle for `MODEL_IDLE_MINUTES` (default 15) is dropped** and
+  reloaded on the next use. The check runs on entry to `_acquire_model` /
+  `_acquire`, not on a timer: this process serves webhooks, and a background
+  thread firing mid-transcription would be worse than the memory. The accepted
+  weakness is that a process receiving nothing never evicts, so the last model
+  of a burst stays until the next message. An in-use count under a lock keeps
+  an eviction from dropping a model another thread is inside — `/webhook` and
+  the dashboard both arrive through a thread pool.
+- **How much actually comes back is the uncertain part.** On macOS, three
+  evict/reload cycles of a real "small" int8 went 590 → 344, 730 → 396,
+  816 → 409 MiB: it plateaus, so it is allocator retention rather than a leak,
+  but under half of the model is returned and a reload peaks higher than never
+  evicting at all. Hence `_return_free_pages()`, which calls `gc.collect()` and
+  then glibc's `malloc_trim(0)` on Linux, best effort. Unverified on the VPS —
+  macOS RSS is not Linux RSS and Linux is where `malloc_trim` applies.
+- **BLIP stays in fp32, deliberately.** `low_cpu_mem_usage=True` raises
+  `ImportError: ... requires Accelerate` with the pinned `transformers==4.44.2`
+  (`modeling_utils.py:3317`), and `accelerate` is a dependency of neither this
+  project nor transformers — so passing it would turn every photo into a 500.
+  `torch_dtype=float16` is not recommended either: the VPS is CPU-only, where
+  many fp16 kernels fall back to fp32 or are missing, so it buys a slower
+  caption for an uncertain saving. Idle eviction is what gives the gigabyte
+  back instead.
+- **Image captioning is reachable, not dead weight.** `index.js` forwards
+  `type: "image"` with the media for any allowed contact's photo, `/webhook`
+  passes it to `run_agent`, and `classify_and_resolve` calls
+  `caption_base64_image`. The weights are not in the Docker image, though: the
+  first photo after a deploy downloads ~1 GB into the `/models` volume.
+
+Measured numbers above are from this Mac, not from the VPS. The one quantity
+the 610 MiB figure in the earlier entry refers to was ~590 MiB here.
+
+
+## Resource limits were raised before they shipped (2026-11-04)
+The figures above were first reasoned against an assumed ~8 GB host. Coolify's
+server page says the machine is **6 cores and 11.7 GB**, so both ceilings went
+to 3 GiB and the bridge to 2 cpus before deploying. Both numbers cap the
+3709 MiB the monitor saw, so both stop the runaway — the difference is only
+what happens if `--max-old-space-size` does not bite, and at 2 GiB that would
+be an OOM kill during the initial WhatsApp Web sync, the one failure that could
+loop. On a machine with that much spare there was no reason to take the bet.
+Deployed in `d00aed5`; the bridge came back up, restored its session and
+reported ready, so the cap does not stop Chromium loading WhatsApp Web.
+
+**Not confirmed:** that the limits actually bound. Coolify's Metrics tab does
+not work for compose applications, and reading the container's own
+`/sys/fs/cgroup/memory.max` needs a shell on the host. If the monitor keeps
+reporting "no memory limit set" they did not land, and the fallback is
+`mem_limit` / `cpus` at service level instead of `deploy.resources.limits`.
