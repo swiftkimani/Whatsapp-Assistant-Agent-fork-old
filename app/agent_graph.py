@@ -23,6 +23,7 @@ class AgentState(TypedDict):
     action: str                   # "send" | "hold"
     hold_reason: str              # "" | "needs_owner" | "not_grounded" | "empty_reply"
     why: str                      # the model's own one-line account, for the owner
+    quote: bool                   # attach the incoming message as a quote
 
 
 def classify_and_resolve(state: AgentState) -> AgentState:
@@ -68,6 +69,7 @@ def generate_reply(state: AgentState) -> AgentState:
     state["grounded"] = result["grounded"]
     state["needs_owner"] = result["needs_owner"]
     state["why"] = result.get("why", "")
+    state["quote"] = result.get("quote", False)
     return state
 
 
@@ -127,5 +129,6 @@ def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: s
         "action": "hold",
         "hold_reason": "",
         "why": "",
+        "quote": False,
     }
     return _compiled_graph.invoke(initial_state)

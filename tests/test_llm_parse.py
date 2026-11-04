@@ -10,7 +10,7 @@ def test_valid_answer():
     out = _parse_answer(json.dumps({"reply": " اه ماشي ", "grounded": True,
                                     "needs_owner": False, "why": "just a greeting"}))
     assert out == {"reply": "اه ماشي", "grounded": True, "needs_owner": False,
-                   "why": "just a greeting"}
+                   "why": "just a greeting", "quote": False}
 
 
 def test_the_reason_is_optional_and_bounded():
@@ -37,3 +37,19 @@ def test_flags_must_be_real_booleans():
 
 def test_missing_needs_owner_defaults_to_holding():
     assert _parse_answer('{"reply": "hi", "grounded": true}')["needs_owner"] is True
+
+
+def test_the_model_can_ask_for_the_incoming_message_to_be_quoted():
+    out = _parse_answer(json.dumps({"reply": "saa nne", "grounded": True,
+                                    "needs_owner": False, "why": "answers one of three",
+                                    "quote": True}))
+    assert out["quote"] is True
+
+
+def test_anything_but_a_real_true_means_no_quote():
+    """A quote on the wrong message is worse than none, so this fails closed
+    the same way the send/hold flags do."""
+    for value in ["true", 1, None, "yes", {}]:
+        out = _parse_answer(json.dumps({"reply": "sawa", "grounded": True,
+                                        "needs_owner": False, "quote": value}))
+        assert out["quote"] is False, value

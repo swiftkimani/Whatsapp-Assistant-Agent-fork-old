@@ -317,10 +317,14 @@ def _parse_answer(raw: str) -> dict:
             "grounded": data.get("grounded") is True,
             "needs_owner": data.get("needs_owner") is not False,
             "why": str(data.get("why") or "").strip()[:200],
+            # Defaults to not quoting: an unquoted reply is the ordinary thing
+            # and reads fine either way, while a quote attached to the wrong
+            # message is actively confusing.
+            "quote": data.get("quote") is True,
         }
     except (ValueError, KeyError, TypeError):
         return {"reply": "", "grounded": False, "needs_owner": True,
-                "why": "the model's answer could not be read"}
+                "why": "the model's answer could not be read", "quote": False}
 
 
 # Shape of the answer, enforced by the API rather than asked for in the prompt.
@@ -336,8 +340,19 @@ ANSWER_SCHEMA = {
         "why": {"type": "string",
                 "description": "One short line, to the owner, saying why this is safe to send "
                                "or why they need to handle it. No more than 20 words."},
+        # Whether to attach the incoming message as a quote, the way a person
+        # swipes to reply. Left to the model because it is a judgement about
+        # the conversation, not a rule: quoting every single reply is the mark
+        # of a bot, and quoting none of them loses the thread in a group or
+        # after a gap.
+        "quote": {"type": "boolean",
+                  "description": "True only when the reply would be confusing without showing "
+                                 "which message it answers: in a group, when several things were "
+                                 "asked at once and this answers one of them, or when hours have "
+                                 "passed since that message. False for an ordinary back-and-forth "
+                                 "where it is obvious what you are replying to."},
     },
-    "required": ["reply", "grounded", "needs_owner", "why"],
+    "required": ["reply", "grounded", "needs_owner", "why", "quote"],
     "additionalProperties": False,
 }
 

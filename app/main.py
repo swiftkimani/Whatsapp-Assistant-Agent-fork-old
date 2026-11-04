@@ -191,7 +191,11 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
     db.log_message(msg.from_, name, "in", result["resolved_text"], "replied")
     db.log_message(msg.from_, name, "out", result["reply_text"], "auto")
     log_event("auto_reply", chat=anon(msg.from_))
-    response = {"action": "send", "reply_text": result["reply_text"], "reply_audio_base64": None}
+    response = {"action": "send", "reply_text": result["reply_text"],
+                # The bridge attaches the quote; it is the only side holding
+                # the incoming message's WhatsApp id.
+                "quote": bool(result.get("quote")),
+                "reply_audio_base64": None}
 
     if REPLY_WITH_VOICE and msg.type == "voice":
         response["reply_audio_base64"] = await synthesize_to_base64(result["reply_text"])
