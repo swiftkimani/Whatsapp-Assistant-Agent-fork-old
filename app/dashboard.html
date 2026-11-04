@@ -67,21 +67,23 @@
   button:disabled{opacity:.5;cursor:not-allowed}
   :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 
-  /* top bar */
-  .top{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);align-items:center;justify-content:space-between}
-  .brand{display:flex;gap:var(--s3);align-items:center}
   .logo{width:40px;height:40px;border-radius:var(--r-md);display:grid;place-items:center;
         color:var(--primary-fg);background:var(--primary)}
   h1{margin:0;font-size:var(--f-lg);font-weight:650;color:var(--text)}
-  .brand small{color:var(--text-muted);font-size:var(--f-sm)}
-  .chips{display:flex;gap:var(--s2);flex-wrap:wrap}
-  .chip{display:inline-flex;align-items:center;gap:var(--s2);padding:var(--s1) var(--s3);border-radius:var(--r-pill);
-        font-size:var(--f-sm);font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text-muted)}
-  .chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
-  .chip.on{color:var(--success);border-color:var(--success)}
-  .chip.warn{color:var(--danger);border-color:var(--danger)}
-  .chip.plain::before{display:none}
-  .top #lockBtn{align-self:center}
+
+  /* The one state worth interrupting the layout for. Paused means every reply
+     is piling up in Held, and a coloured dot in a rail is not enough to say
+     so — least of all on a phone, where the rail has no room for words. */
+  .pausebar{display:flex;gap:var(--s2);align-items:center;padding:var(--s2) var(--s3);
+            border:1px solid var(--warning);border-radius:var(--r-sm);
+            background:var(--surface);color:var(--warning);
+            font-size:var(--f-sm);font-weight:600}
+  .pausebar svg{flex:none}
+  .pausebar span{flex:1;min-width:0}
+  .pausebar button{flex:none}
+  @media (max-width:560px){
+    .pausebar .long{display:none}
+  }
 
   /* tabs */
   /* A vertical rail, the way WhatsApp Web does it. Navigation costs
@@ -99,15 +101,109 @@
   .tabs button:hover{background:var(--surface-raised)}
   .tabs button[aria-selected="true"]{color:var(--primary-fg);background:var(--primary)}
   .badge{padding:0 var(--s1);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--f-xs);font-weight:600}
-  .tabs .badge{position:absolute;top:2px;right:8px}
+  .tabs .badge{position:absolute;top:0;right:2px;min-width:16px;text-align:center;
+               font-size:10px;line-height:16px;padding:0 3px}
+  /* Sections at the top of the rail, you at the bottom — where WhatsApp puts
+     its own profile, and where a thing you touch twice a day belongs. */
+  .rail-gap{flex:1}
+  .rail-foot{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;align-items:center;
+             justify-content:center;padding:var(--s2) 0;border:0;border-radius:var(--r-sm);
+             background:transparent;color:var(--text-muted);font-weight:500;
+             transition:background var(--d-fast) var(--ease)}
+  .rail-foot:hover{background:var(--surface-raised)}
+  .rail-foot .lbl{font-size:9px;line-height:1.1;text-align:center}
+  .statdot{width:10px;height:10px;border-radius:50%;background:var(--text-muted);flex:none}
+  .rail-foot.on{color:var(--success)}
+  .rail-foot.on .statdot{background:var(--success)}
+  .rail-foot.paused{color:var(--warning)}
+  .rail-foot.paused .statdot{background:var(--warning)}
+  .face{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex:none;
+        border:1px solid var(--border);background:var(--surface-raised);color:var(--text-muted)}
+  .face.big{width:44px;height:44px}
+
+  /* ---- profile and settings, in a sheet rather than a permanent bar ---- */
+  /* A real <dialog>: focus trapping, Escape and the backdrop come from the
+     browser. A settings panel you cannot close from a keyboard is not one. */
+  .sheet{width:min(480px,calc(100vw - var(--s6)));max-height:min(86dvh,720px);padding:0;
+         border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);
+         color:var(--text);box-shadow:var(--e2);display:flex;flex-direction:column;overflow:hidden}
+  .sheet:not([open]){display:none}
+  .sheet::backdrop{background:rgba(8,10,12,.45)}
+  .sheet-head{display:flex;gap:var(--s3);align-items:center;padding:var(--s4);
+              border-bottom:1px solid var(--border)}
+  .sheet-id{flex:1;min-width:0}
+  .sheet-id h2{margin:0;font-size:var(--f-lg);font-weight:650}
+  .sheet-id .note{margin:0}
+  .sheet-body{flex:1;min-height:0;overflow-y:auto;padding:0 var(--s4) var(--s4)}
+  .sheet-group{margin:var(--s4) 0 0;font-size:var(--f-xs);font-weight:700;letter-spacing:.06em;
+               text-transform:uppercase;color:var(--text-muted)}
+  /* One row per setting, with the reason beside it. These were tooltips on a
+     pill, which a touchscreen cannot show at all. */
+  .srow{display:flex;gap:var(--s4);align-items:center;padding:var(--s3) 0;
+        border-bottom:1px solid var(--border);cursor:pointer}
+  .srow:has(+ .sheet-group),.srow:last-child{border-bottom:0}
+  .srow-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .srow-t{font-weight:600}
+  .srow-d{color:var(--text-muted);font-size:var(--f-sm);line-height:1.45}
+  .switch{flex:none;appearance:none;-webkit-appearance:none;width:44px;height:26px;margin:0;
+          padding:0;position:relative;border-radius:var(--r-pill);background:var(--surface-raised);
+          border:1px solid var(--border);cursor:pointer;
+          transition:background var(--d-fast) var(--ease),border-color var(--d-fast) var(--ease)}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;
+                 border-radius:50%;background:var(--text-muted);
+                 transition:transform var(--d-fast) var(--ease),background var(--d-fast) var(--ease)}
+  .switch:checked{background:var(--primary);border-color:var(--primary)}
+  .switch:checked::after{transform:translateX(18px);background:var(--primary-fg)}
+  /* On a phone these two have no slot in the bottom bar, so this is the way
+     to them. On a wide screen the rail already shows them and the group is
+     simply a second route. */
+  .goto{display:flex;gap:var(--s2);margin-top:var(--s2);flex-wrap:wrap}
+  .goto button{flex:1;min-width:120px;min-height:44px;border:1px solid var(--border);
+               border-radius:var(--r-sm);background:var(--surface);font-weight:600}
+  .goto button:hover{background:var(--surface-raised)}
+  .seg{display:flex;width:fit-content;margin-top:var(--s2);border:1px solid var(--border);
+       border-radius:var(--r-sm);overflow:hidden}
+  .seg button{min-height:40px;padding:var(--s2) var(--s4);border:0;background:var(--surface);
+              color:var(--text-muted);font-size:var(--f-sm);font-weight:600}
+  .seg button + button{border-inline-start:1px solid var(--border)}
+  .seg button[aria-checked="true"]{background:var(--primary);color:var(--primary-fg)}
+  .signout{width:100%;min-height:44px;margin-top:var(--s3);border:1px solid var(--border);
+           border-radius:var(--r-sm);background:var(--surface);color:var(--danger);font-weight:600}
+  .signout:hover{background:var(--surface-raised)}
+  .icon{display:grid;place-items:center;width:40px;height:40px;flex:none;border-radius:var(--r-sm);
+        border:1px solid var(--border);background:var(--surface);color:var(--text-muted)}
+  .icon:hover{background:var(--surface-raised);color:var(--text)}
+  .sheet-head .icon{border:0;background:transparent}
   @media (max-width:900px){
-    /* Back to a strip along the bottom on a phone, where height is scarcer
-       still and a side rail would eat the thread's width. */
+    /* A bottom bar, the way the phone app does it: a handful of destinations,
+       every one of them named. Icons alone are a memory test, and a label
+       that appears only on the open tab names the one place you already are.
+       Five is the ceiling, so the two quietest sections move into You. */
     #shell{flex-direction:column-reverse}
-    .tabs{flex-direction:row;flex:0 0 auto}
-    .tabs button{flex:1}
-    .tabs .lbl{display:none}
-    .tabs [aria-selected="true"] .lbl{display:inline;font-size:var(--f-xs)}
+    .tabs{flex-direction:row;flex:0 0 auto;gap:0;padding:var(--s1)}
+    /* Every destination is built the same: equal width, one icon size, one
+       label size, one weight. Only colour and the pill behind the icon say
+       which one is open, so nothing moves or resizes as you switch. */
+    .tabs > button{flex:1;min-width:0;gap:var(--s1);padding:var(--s2) 0 var(--s1);
+                   background:transparent;color:var(--text-muted)}
+    .tabs > button svg,.rail-foot .face{box-sizing:content-box;padding:2px 14px;
+                   border:0;width:17px;height:17px;border-radius:var(--r-pill);
+                   background:transparent;
+                   transition:background var(--d-base) var(--ease),color var(--d-base) var(--ease)}
+    .rail-foot .face svg{width:17px;height:17px;padding:0;background:none}
+    .tabs .lbl{display:block;font-size:10px;line-height:1.2;font-weight:600;
+               overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
+               transition:color var(--d-base) var(--ease)}
+    #tab-activity,#tab-notes{display:none}
+    /* The pill fades in behind the open icon rather than snapping on, and the
+       whole target does not turn green — the phone apps mark the icon only. */
+    .tabs > button[aria-selected="true"]{color:var(--primary);background:transparent}
+    .tabs > button[aria-selected="true"] svg{background:var(--primary-weak)}
+    .tabs > button:active svg,.tabs > button:active .face{background:var(--surface-raised)}
+    .tabs .badge{top:0;right:calc(50% - 26px)}
+    /* Inside a conversation the bar goes away, as it does on the phone: the
+       back arrow is the way out, and the thread gets the height back. */
+    #shell:has(#view-whatsapp:not([hidden]) .wa-split[data-open="thread"]) .tabs{display:none}
   }
 
   /* views */
@@ -130,6 +226,9 @@
 
   /* WhatsApp list */
   .wa-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--f-md);font-weight:600}
+  .wa-head{display:flex;gap:var(--s2);align-items:center;min-height:40px}
+  #waWhoFace:empty{display:none}
+  #waWhoFace .avatar{width:32px;height:32px;font-size:var(--f-sm)}
   .wa-row{display:flex;flex-direction:column;gap:var(--s1);width:100%;padding:var(--s2) var(--s3);
           border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);
           text-align:start;font:inherit;color:inherit;transition:background var(--d-fast) var(--ease)}
@@ -144,14 +243,46 @@
   .wa-ai input{width:auto;padding:0;margin:0;accent-color:var(--primary)}
   .wa-ai.on{color:var(--primary);border-color:var(--primary)}
   .wa-ai.muted{display:none}          /* a group cannot be answered; saying so on every row is noise */
-  .wa-search{width:100%}
-  .wa-filters{display:flex;gap:var(--s1);flex-wrap:wrap}
-  .wa-filters button{padding:2px var(--s2);border-radius:var(--r-pill);font-size:var(--f-xs);
+  .wa-find{display:flex;gap:var(--s2);align-items:center}
+  .wa-search{flex:1;min-width:0}
+  .wa-bar{display:flex;gap:var(--s2);align-items:center;min-width:0}
+  /* One line, always. Seven pills wrapped onto a second and a third row, and
+     with the count below them that was three conversations' worth of height
+     spent before the first conversation — which is exactly the complaint.
+     They scroll sideways instead, where there is room to spare. */
+  .wa-filters{display:flex;flex:1;min-width:0;gap:var(--s1);flex-wrap:nowrap;
+              overflow-x:auto;scrollbar-width:none;scroll-snap-type:x proximity}
+  .wa-filters::-webkit-scrollbar{display:none}
+  /* Scrolled pills end in a fade, so a half-shown pill reads as "there is
+     more this way" instead of as a rendering fault. */
+  .wa-filters{mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent)}
+  .wa-filters button{flex:none;scroll-snap-align:start;min-height:28px;padding:2px var(--s3);
+                     border-radius:var(--r-pill);font-size:var(--f-xs);white-space:nowrap;
                      font-weight:600;color:var(--text-muted);background:var(--surface);
                      border:1px solid var(--border)}
   .wa-filters button[aria-pressed="true"]{color:var(--primary-fg);background:var(--primary);
                      border-color:var(--primary)}
-  .wa-count{font-size:var(--f-xs);color:var(--text-muted)}
+  /* Beside the filters rather than inside the list, where it was one more row
+     to scroll past and pushed a conversation off the bottom. */
+  .wa-count{flex:none;font-size:var(--f-xs);color:var(--text-muted);white-space:nowrap}
+  /* A border and a radius around every row is the card-in-a-card look the
+     owner called slop, and it cost two pixels and a gap per conversation.
+     Hairline dividers instead, the way every phone contact list does it. */
+  .panel.flat{padding:0;gap:0}
+  .panel.flat > *{flex:none}
+  .panel.flat .wa-row{flex-direction:row;align-items:center;gap:var(--s2);
+                      border:0;border-radius:0;background:transparent;
+                      border-bottom:1px solid var(--border);padding:var(--s2) var(--s3)}
+  .panel.flat .wa-openrow{flex:1;min-width:0}
+  .panel.flat .wa-row:last-child{border-bottom:0}
+  .panel.flat .wa-row:hover{background:var(--surface-raised)}
+  .panel.flat .wa-row[aria-current="true"]{background:var(--surface-raised);
+                      box-shadow:inset 3px 0 0 var(--primary)}
+  .panel.flat .wa-row.wa-assistant{background:var(--primary-weak)}
+  .panel.flat .note{padding:var(--s3)}
+  /* The AI switch rides in the right-hand column with the time, so a row is
+     two lines like a WhatsApp row instead of three. */
+  .panel.flat .wa-ai{align-self:center;flex:none}
   .wa-row.wa-assistant{border-color:var(--primary);background:var(--primary-weak)}
   .wa-row.wa-assistant .avatar{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   #assistantPane{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s2)}
@@ -165,8 +296,11 @@
   .wa-kind{display:block;font-size:var(--f-xs);font-weight:600;color:var(--text-muted);margin-bottom:var(--s1)}
   .msg time{display:block;margin-top:var(--s1);font-size:var(--f-xs);color:var(--text-muted)}
   .me time{color:inherit;opacity:.75}
-  .waauto{display:flex;gap:var(--s2);align-items:center;font-size:var(--f-sm);color:var(--text-muted);
-          white-space:nowrap;cursor:pointer}
+  .waauto{display:flex;flex:none;gap:var(--s2);align-items:center;font-size:var(--f-xs);
+          font-weight:600;color:var(--text-muted);white-space:nowrap;cursor:pointer;
+          padding:2px var(--s2);border:1px solid var(--border);border-radius:var(--r-pill)}
+  .waauto.on{border-color:var(--primary)}
+  #waAutoNote{margin:0}
   .waauto input{width:auto;padding:0;accent-color:var(--primary)}
   .waauto.on{color:var(--primary)}
   /* On the list, a chat the assistant answers says so in a word, not a colour. */
@@ -195,6 +329,20 @@
   body.resizing{cursor:col-resize;user-select:none}
   body.resizing iframe,body.resizing .panel{pointer-events:none}
   @media (max-width:900px){ .wa-grip{display:none} }
+  @media (max-width:900px){
+    /* The rail is a strip now, so there is no "bottom" to push you to. */
+    .rail-gap{display:none}
+    /* You is a destination like the others down here, not a trailing button
+       stuck on the end at a different size. */
+    .rail-foot{flex:1}
+    .rail-foot .face{display:grid;place-items:center}
+    #statusBtn{display:none}        /* the paused bar says it in words instead */
+  }
+  @media (max-width:560px){
+    /* A sheet from the bottom edge, where a thumb is. */
+    .sheet{width:100%;max-width:100%;max-height:88dvh;margin:auto auto 0;
+           border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0}
+  }
   /* The list is right there, so there is nothing to go back to. The button is
      only meaningful once the columns stack. */
   @media (min-width:901px){ #waBack{display:none} }
@@ -358,21 +506,8 @@
   /* Phones: 360px up, no horizontal scrolling of the page itself. */
   @media (max-width:560px){
     #app{padding:var(--s2);gap:var(--s2)}
-    .top{gap:var(--s1) var(--s2)}
-    .brand small{display:none}
     .logo{width:32px;height:32px}
     h1{font-size:var(--f-md)}
-    /* Five switches and a sign-out ran to three rows at 360px. Smaller type
-       and tighter padding fit them in two without hiding any of them. */
-    .chip{font-size:var(--f-xs);padding:2px var(--s2);gap:var(--s1)}
-    .chips{gap:var(--s1)}
-    /* Sign out is not a switch, so on a phone it sits up on the title row
-       instead of costing the switches a line of their own. Placed explicitly:
-       auto-placement would follow DOM order and drop it below the chips. */
-    .top{display:grid;grid-template-columns:1fr auto;gap:var(--s1) var(--s2);align-items:center}
-    .brand{grid-column:1;grid-row:1}
-    #lockBtn{grid-column:2;grid-row:1;justify-self:end}
-    .chips{grid-column:1 / -1;grid-row:2}
     /* Tabs scroll instead of squeezing: the selected one keeps its label, so
        equal flex shares pushed the last tab off the edge and clipped it. */
     .tabs{gap:0}
@@ -409,61 +544,77 @@
 </section>
 
 <main id="app" hidden>
-  <header class="top">
-    <div class="brand">
-      <div class="logo" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg></div>
-      <div><h1>WhatsApp Assistant</h1><small>Your replies, under your control</small></div>
-    </div>
-    <div class="chips">
-      <button id="autoBtn" class="chip on" type="button" aria-pressed="true" title="When paused, every reply waits for your approval">Auto-reply: On</button>
-      <button id="directBtn" class="chip on" type="button" aria-pressed="true" title="When on, messages you tell me to send go out immediately">Direct send: On</button>
-      <button id="copyBtn" class="chip off" type="button" aria-pressed="false" title="Copy every reply she sends by herself into your own WhatsApp chat, so your phone shows what went out as you">Copy to me: Off</button>
-      <button id="wakeBtn" class="chip off" type="button" aria-pressed="false" title="Say the name to talk hands-free. Uses the browser's speech service (Chrome or Edge) while this page is open.">Say Arianna: Off</button>
-      <button id="voiceBtn" class="chip on" type="button" aria-pressed="true" title="When on, what you dictate is sent right away and I answer out loud">Voice chat: On</button>
-    </div>
-    <button id="themeBtn" class="chip plain" type="button" aria-label="Switch between light and dark">Theme</button>
-    <button id="lockBtn" class="chip plain" type="button">Sign out</button>
-  </header>
+  <div id="pausedBar" class="pausebar" role="status" hidden>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M10 5v14M16 5v14"/></svg>
+    <span>Replies are paused<span class="long"> — everything she writes waits in Held for you</span>.</span>
+    <button id="resumeBtn" class="ghost" type="button">Resume</button>
+  </div>
 
   <div id="shell">
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button id="tab-whatsapp" data-tab="whatsapp" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg><span class="lbl">WhatsApp</span><span id="waUnread" class="badge" hidden></span></button>
-    <button id="tab-held" data-tab="held" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="lbl">Held</span><span id="heldCount" class="badge" hidden></span></button>
-    <button id="tab-messages" data-tab="messages" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span class="lbl">Messages</span></button>
-    <button id="tab-activity" data-tab="activity" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="lbl">Activity</span></button>
-    <button id="tab-notes" data-tab="notes" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg><span class="lbl">Notes</span></button>
-    <button id="tab-people" data-tab="people" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg><span class="lbl">Contacts</span></button>
+    <button id="tab-whatsapp" data-tab="whatsapp" role="tab" aria-selected="false" aria-label="WhatsApp"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg><span class="lbl">WhatsApp</span><span id="waUnread" class="badge" hidden></span></button>
+    <button id="tab-held" data-tab="held" role="tab" aria-selected="false" aria-label="Held replies"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="lbl">Held</span><span id="heldCount" class="badge" hidden></span></button>
+    <button id="tab-messages" data-tab="messages" role="tab" aria-selected="false" aria-label="Messages"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><span class="lbl">Messages</span></button>
+    <button id="tab-activity" data-tab="activity" role="tab" aria-selected="false" aria-label="Activity"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="lbl">Activity</span></button>
+    <button id="tab-notes" data-tab="notes" role="tab" aria-selected="false" aria-label="Notes"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M9 12h6M9 16h6"/></svg><span class="lbl">Notes</span></button>
+    <button id="tab-people" data-tab="people" role="tab" aria-selected="false" aria-label="Contacts"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg><span class="lbl">Contacts</span></button>
+    <div class="rail-gap" aria-hidden="true"></div>
+    <button id="statusBtn" class="rail-foot" type="button" aria-haspopup="dialog">
+      <span id="statusDot" class="statdot" aria-hidden="true"></span>
+      <span id="statusLbl" class="lbl">Replying</span>
+    </button>
+    <button id="profileBtn" class="rail-foot" type="button" aria-haspopup="dialog"
+            aria-label="You — settings and sign out">
+      <span class="face"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg></span>
+      <span class="lbl">You</span>
+    </button>
   </nav>
 
   <div id="pair" class="pair">
   <section id="view-whatsapp" class="view" hidden>
     <div class="wa-split" data-open="list">
       <div class="wa-col wa-list-col">
-        <div class="filters">
-          <strong class="wa-who">Chats</strong>
-          <button id="waRefresh" class="ghost" type="button">Refresh</button>
+        <div class="wa-find">
+          <input id="waSearch" class="wa-search" type="search" autocomplete="off"
+                 placeholder="Search conversations" aria-label="Search conversations">
+          <button id="waRefresh" class="icon" type="button" title="Refresh"
+                  aria-label="Refresh the conversation list"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.4 5.7"/><path d="M20 4v7h-7"/></svg></button>
         </div>
-        <input id="waSearch" class="wa-search" type="search" autocomplete="off"
-               placeholder="Search conversations" aria-label="Search conversations">
-        <div id="waFilters" class="wa-filters" role="group" aria-label="Filter conversations"></div>
-        <div id="waList" class="panel"></div>
+        <div class="wa-bar">
+          <div id="waFilters" class="wa-filters" role="group" aria-label="Filter conversations"></div>
+          <span id="waCount" class="wa-count" role="status"></span>
+        </div>
+        <div id="waList" class="panel flat"></div>
       </div>
       <div id="waGrip" class="wa-grip" role="separator" aria-orientation="vertical"
            tabindex="0" aria-label="Drag to resize the chat list"
            title="Drag to resize — double-click to reset"></div>
       <div class="wa-col wa-thread-col">
-        <div class="filters">
-          <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
+        <div class="wa-head">
+          <button id="waBack" class="icon" type="button" hidden aria-label="Back to conversations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <span id="waWhoFace"></span>
           <strong id="waWho" class="wa-who" dir="auto">Pick a conversation</strong>
           <label id="waAutoWrap" class="waauto" hidden>
             <input id="waAuto" type="checkbox">
-            <span id="waAutoLabel">Assistant replies</span>
+            <span id="waAutoLabel">AI on</span>
           </label>
+        </div>
+        <!-- Why she is answering this person, said once under the header
+             rather than squeezed into it. Only when it is not your own
+             decision, because that is the case that surprises people. -->
+        <p id="waAutoNote" class="note" hidden></p>
+        <div hidden>
         </div>
         <!-- Deliberately not a live region: it is replaced wholesale on every
              poll, which would re-announce the entire thread to a screen
              reader each time. -->
-        <div id="waPanel" class="panel"></div>
+        <div id="waPanel" class="panel">
+          <div id="waPickEmpty" class="empty">
+            <div class="hero" aria-hidden="true"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg></div>
+            <h2>Pick a conversation</h2>
+            <p>Choose someone from the list to read the thread and reply.</p>
+          </div>
+        </div>
         <div id="assistantPane" hidden>
         <div id="log" class="panel" aria-live="polite">
               <div id="empty" class="empty">
@@ -559,6 +710,67 @@
   </div>
   <audio id="voice" hidden></audio>
 </main>
+
+<!-- Everything that used to sit in a permanent bar across the top. None of it
+     is used often enough to spend the height of two conversation rows on it,
+     every day, on every screen. -->
+<dialog id="sheet" class="sheet" aria-labelledby="sheetTitle">
+  <div class="sheet-head">
+    <span class="face big"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg></span>
+    <div class="sheet-id">
+      <h2 id="sheetTitle">You</h2>
+      <p id="sheetSub" class="note">Signed in on this device.</p>
+    </div>
+    <button id="sheetClose" class="icon" type="button" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+
+  <div class="sheet-body">
+    <h3 class="sheet-group" id="grp-replies">Replies</h3>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t" id="autoBtnLabel">Reply by itself</span>
+        <span class="srow-d">With this off, every reply waits in Held for your approval before it goes anywhere.</span></span>
+      <input id="autoBtn" class="switch" type="checkbox" role="switch">
+    </label>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t" id="directBtnLabel">Send what I ask for</span>
+        <span class="srow-d">When on, a message you tell her to send goes out without a confirmation card.</span></span>
+      <input id="directBtn" class="switch" type="checkbox" role="switch">
+    </label>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t" id="copyBtnLabel">Copy her replies to me</span>
+        <span class="srow-d">Every reply she sends by herself is also copied into your own WhatsApp chat, so your phone shows what went out as you. The other person sees nothing extra.</span></span>
+      <input id="copyBtn" class="switch" type="checkbox" role="switch">
+    </label>
+
+    <h3 class="sheet-group">Voice</h3>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t" id="wakeBtnLabel">Wake on her name</span>
+        <span class="srow-d">Say the name to talk hands-free. Uses the browser's own speech service, and only while this page is open.</span></span>
+      <input id="wakeBtn" class="switch" type="checkbox" role="switch">
+    </label>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t" id="voiceBtnLabel">Talk back out loud</span>
+        <span class="srow-d">What you dictate is sent straight away, and her answer is spoken.</span></span>
+      <input id="voiceBtn" class="switch" type="checkbox" role="switch">
+    </label>
+
+    <h3 class="sheet-group">More sections</h3>
+    <div id="goTo" class="goto">
+      <button type="button" data-goto="activity">Activity</button>
+      <button type="button" data-goto="notes">Notes</button>
+    </div>
+
+    <h3 class="sheet-group">Appearance</h3>
+    <div id="themePick" class="seg" role="radiogroup" aria-label="Theme">
+      <button type="button" role="radio" data-theme-pick="system">Auto</button>
+      <button type="button" role="radio" data-theme-pick="light">Light</button>
+      <button type="button" role="radio" data-theme-pick="dark">Dark</button>
+    </div>
+
+    <h3 class="sheet-group">This device</h3>
+    <button id="lockBtn" class="signout" type="button">Sign out</button>
+  </div>
+</dialog>
 
 <div id="orbWrap" class="orb-wrap" data-state="off" aria-live="polite">
   <div class="orb-stage"><div id="orb" class="orb"></div></div>
@@ -668,21 +880,28 @@
   // "light" and "dark" are the overrides. Remembered per browser.
   const THEMES = ["system", "light", "dark"];
   let theme = "system";
-  try { theme = localStorage.getItem("theme") || "system"; } catch { /* private mode */ }
+  try {
+    const saved = localStorage.getItem("theme");
+    if (THEMES.includes(saved)) theme = saved;
+  } catch { /* private mode */ }
   function applyTheme() {
     if (theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", theme);
-    const label = { system: "Theme: auto", light: "Theme: light", dark: "Theme: dark" };
-    $("themeBtn").textContent = label[theme];
+    for (const b of $("themePick").children) {
+      b.setAttribute("aria-checked", String(b.dataset.themePick === theme));
+    }
     try { localStorage.setItem("theme", theme); } catch { /* private mode */ }
   }
-  $("themeBtn").onclick = () => {
-    theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-    applyTheme();
-  };
+  // Three choices side by side, not one button that cycles: a cycling button
+  // cannot say what the next press will do, so you press it until it looks
+  // right.
+  for (const b of $("themePick").children) {
+    b.onclick = () => { theme = b.dataset.themePick; applyTheme(); };
+  }
   applyTheme();
 
   $("lockBtn").onclick = async () => {
+    $("sheet").close();
     await fetch("/api/logout", { method: "POST" }).catch(() => {});
     log.replaceChildren($("empty"));
     $("empty").hidden = false;
@@ -719,52 +938,83 @@
   }
   document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
 
-  // ---- status chips (the two switches) ----
+  // ---- the switches, which live in the sheet now ----
   const autoBtn = $("autoBtn"), directBtn = $("directBtn"), copyBtn = $("copyBtn");
-  function setChip(button, label, state, on, offClass) {
-    button.className = "chip " + (on ? "on" : offClass);
-    button.textContent = `${label}: ${state}`;
-    button.setAttribute("aria-pressed", String(on));
-  }
   function applyStatus(s) {
     autoOn = s.auto_reply; directOn = s.direct_send; copyOn = s.self_log;
-    setChip(autoBtn, "Auto-reply", autoOn ? "On" : "Paused", autoOn, "warn");
-    setChip(directBtn, "Direct send", directOn ? "On" : "Off", directOn, "off");
-    setChip(copyBtn, "Copy to me", copyOn ? "On" : "Off", copyOn, "off");
+    autoBtn.checked = autoOn;
+    directBtn.checked = directOn;
+    copyBtn.checked = copyOn;
+    renderAssistantState();
     const badge = $("heldCount");
     badge.hidden = !s.held;
-    badge.textContent = s.held;
+    badge.textContent = unreadLabel(s.held);
+  }
+
+  /** Whether she is answering by herself is the one thing on this page that
+   *  can go wrong quietly, so it is said in two places: a word in the rail at
+   *  all times, and a bar across the top whenever it is paused. A coloured
+   *  dot is not a sentence, and on a phone the rail has no room for one. */
+  function renderAssistantState() {
+    const foot = $("statusBtn");
+    foot.className = "rail-foot " + (autoOn ? "on" : "paused");
+    $("statusLbl").textContent = autoOn ? "Replying" : "Paused";
+    foot.setAttribute("aria-label", autoOn
+      ? "She is replying by herself. Open your settings."
+      : "Replies are paused. Open your settings.");
+    $("pausedBar").hidden = autoOn;
   }
   async function loadStatus() {
     try { applyStatus(await api("/api/status")); } catch { /* lock screen handles it */ }
   }
-  async function flip(button, path, next, message) {
-    button.disabled = true;
+  async function flip(input, path, next, message) {
+    input.disabled = true;
     try {
       applyStatus(await api(path, { enabled: next }));
       bubble("bot", message);
     } catch (err) {
       bubble("bot", err.message, true);
+      // A switch that moved while the server refused is a lie about what the
+      // assistant will do next, so it goes back where it was.
+      input.checked = !next;
     } finally {
-      button.disabled = false;
+      input.disabled = false;
     }
   }
-  autoBtn.onclick = () => flip(autoBtn, "/api/auto-reply", !autoOn, autoOn
-    ? "Auto-reply is paused. Every reply now waits in Held for your approval." : "Auto-reply is on.");
-  directBtn.onclick = () => flip(directBtn, "/api/direct-send", !directOn, directOn
-    ? "Direct send is off. I'll show a card to confirm before anything goes out." : "Direct send is on. What you tell me to send goes out immediately.");
-  copyBtn.onclick = () => flip(copyBtn, "/api/self-log", !copyOn, copyOn
-    ? "I'll stop copying my replies to you."
-    : "Every reply I send by myself will also appear in your own WhatsApp chat, so your phone shows what went out as you. The person you're talking to sees nothing extra.");
+  autoBtn.onchange = () => flip(autoBtn, "/api/auto-reply", autoBtn.checked, autoBtn.checked
+    ? "Auto-reply is on." : "Auto-reply is paused. Every reply now waits in Held for your approval.");
+  directBtn.onchange = () => flip(directBtn, "/api/direct-send", directBtn.checked, directBtn.checked
+    ? "Direct send is on. What you tell me to send goes out immediately." : "Direct send is off. I'll show a card to confirm before anything goes out.");
+  copyBtn.onchange = () => flip(copyBtn, "/api/self-log", copyBtn.checked, copyBtn.checked
+    ? "Every reply I send by myself will also appear in your own WhatsApp chat, so your phone shows what went out as you. The person you're talking to sees nothing extra."
+    : "I'll stop copying my replies to you.");
+  $("resumeBtn").onclick = () => {
+    autoBtn.checked = true;
+    flip(autoBtn, "/api/auto-reply", true, "Auto-reply is on.");
+  };
+
+  // ---- the sheet: profile, every switch, the theme and signing out ----
+  const sheet = $("sheet");
+  const openSheet = () => { if (!sheet.open) sheet.showModal(); };
+  $("statusBtn").onclick = openSheet;
+  $("profileBtn").onclick = openSheet;
+  $("sheetClose").onclick = () => sheet.close();
+  for (const b of $("goTo").children) {
+    b.onclick = () => { sheet.close(); show(b.dataset.goto); };
+  }
+  // Clicking the backdrop is the gesture everyone tries first. A dialog
+  // reports those clicks as landing on itself, so the target has to be the
+  // dialog and not anything inside it.
+  sheet.onclick = (e) => { if (e.target === sheet) sheet.close(); };
 
   // ---- voice chat: dictate -> sent right away -> answer spoken (preference kept on this device) ----
   const voiceBtn = $("voiceBtn"), voice = $("voice");
   let voiceChat = true, audioUnlocked = false;
   try { voiceChat = localStorage.getItem("voiceChat") !== "0"; } catch { /* private mode */ }
-  function renderVoiceChip() { setChip(voiceBtn, "Voice chat", voiceChat ? "On" : "Off", voiceChat, "off"); }
+  function renderVoiceChip() { voiceBtn.checked = voiceChat; }
   renderVoiceChip();
-  voiceBtn.onclick = () => {
-    voiceChat = !voiceChat;
+  voiceBtn.onchange = () => {
+    voiceChat = voiceBtn.checked;
     try { localStorage.setItem("voiceChat", voiceChat ? "1" : "0"); } catch { /* ignore */ }
     renderVoiceChip();
     if (!voiceChat && wakeOn) setWake(false);
@@ -924,7 +1174,8 @@
   let wakeOn = false, wakeRec = null, wakeHolds = 0, wakeDelay = 400, beepCtx = null;
   try { wakeOn = localStorage.getItem("wake") === "1" && !!SR; } catch { /* private mode */ }
 
-  function renderWakeChip() { setChip(wakeBtn, `Say ${ASSISTANT_NAME}`, wakeOn ? "On" : "Off", wakeOn, "off"); }
+  function renderWakeChip() { wakeBtn.checked = wakeOn; }
+  $("wakeBtnLabel").textContent = `Say “${ASSISTANT_NAME}”`;
   renderWakeChip();
 
   function beep() {
@@ -984,9 +1235,12 @@
     if (on) { startWake(); } else { stopWake(); }
     if (problem) bubble("bot", problem, true);
   }
-  wakeBtn.onclick = () => {
-    if (!SR) return bubble("bot", "Hands-free needs Chrome or Edge (on a computer or Android).", true);
-    if (!window.isSecureContext) return bubble("bot", "Hands-free needs an HTTPS link.", true);
+  wakeBtn.onchange = () => {
+    // These two refusals leave the switch already flipped, so each one has to
+    // put it back before saying why.
+    const refuse = (why) => { renderWakeChip(); return bubble("bot", why, true); };
+    if (!SR) return refuse("Hands-free needs Chrome or Edge (on a computer or Android).");
+    if (!window.isSecureContext) return refuse("Hands-free needs an HTTPS link.");
     unlockAudio();
     if (!wakeOn && !voiceChat) { voiceChat = true; renderVoiceChip(); }
     setWake(!wakeOn);
@@ -1360,7 +1614,12 @@
       ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : d.toLocaleDateString();
   };
-  const groupSuffix = (c) => (c.is_group ? " · group" : "");
+  const groupSuffix = (c) => {
+    if (!c.is_group) return "";
+    if (c.left) return " · you left";
+    if (c.is_community_parent) return " · community";
+    return " · group";
+  };
   // One rule wherever a count is shown, so a busy chat cannot stretch its row.
   const unreadLabel = (n) => (n > 99 ? "99+" : String(n));
 
@@ -1400,13 +1659,13 @@
       box.type = "checkbox";
       box.checked = Boolean(state.auto);
       box.setAttribute("aria-label", `Let the assistant reply to ${c.name}`);
-      const label = el("span", "", state.auto ? "AI replies" : "AI off");
+      const label = el("span", "", state.auto ? "AI on" : "AI off");
       box.onchange = async () => {
         box.disabled = true;
         try {
           const now = await setAssistantFor(c.id, c.name, box.checked);
           wrap.classList.toggle("on", now.auto);
-          label.textContent = now.auto ? "AI replies" : "AI off";
+          label.textContent = now.auto ? "AI on" : "AI off";
           if (c.id === waChat) showAssistantToggle({ ...c, assistant: now }, state.mode);
         } catch (err) {
           box.checked = !box.checked;
@@ -1521,9 +1780,11 @@
     wrap.classList.toggle("on", state.auto);
     // "Chosen" and "happens to match the default" look identical until the
     // default changes, so the difference is spelled out rather than implied.
-    label.textContent = state.chosen
-      ? "Assistant replies"
-      : `Assistant replies (following the default: ${MODES[defaultMode] || defaultMode})`;
+    label.textContent = state.auto ? "AI on" : "AI off";
+    const note_ = $("waAutoNote");
+    note_.hidden = Boolean(state.chosen);
+    note_.textContent = state.chosen ? ""
+      : `Following your default: ${MODES[defaultMode] || defaultMode}.`;
   }
 
   $("waAuto").onchange = async () => {
@@ -1536,8 +1797,9 @@
       });
       waAssistant = r.assistant;
       $("waAutoWrap").classList.toggle("on", r.assistant.auto);
-      $("waAutoLabel").textContent = r.assistant.auto
-        ? "Assistant replies" : "Assistant holds for you";
+      $("waAutoLabel").textContent = r.assistant.auto ? "AI on" : "AI off";
+      // It is a decision now, so the line about following a default is gone.
+      $("waAutoNote").hidden = true;
       loadContacts();
     } catch (err) {
       box.checked = !box.checked;
@@ -1640,12 +1902,14 @@
   function showAssistant() {
     waChat = null;
     $("waWho").textContent = ASSISTANT_NAME;
+    $("waWhoFace").replaceChildren(avatar(ASSISTANT_NAME));
     $("waAutoWrap").hidden = true;
     $("waReply").hidden = true;
     $("waPanel").hidden = true;
     $("assistantPane").hidden = false;
     waSplit().dataset.open = "thread";
     $("waBack").hidden = false;
+    pushThread();
     markOpenRow(ASSISTANT);
     $("text").focus();
   }
@@ -1681,8 +1945,10 @@
     noai:     { label: "AI off",   keep: (c) => c.assistant && c.assistant.can_choose && !c.assistant.auto },
     unread:   { label: "Unread",   keep: (c) => c.unread > 0 },
     direct:   { label: "Direct",   keep: (c) => !c.is_group },
-    groups:   { label: "Groups",   keep: (c) => c.is_group },
+    groups:   { label: "Groups",   keep: (c) => c.is_group && !c.left },
+    communities: { label: "Communities", keep: (c) => c.community || c.is_community_parent },
     archived: { label: "Archived", keep: (c) => c.archived },
+    left:     { label: "Left",     keep: (c) => c.left },
   };
 
   function renderWaFilters() {
@@ -1703,18 +1969,20 @@
     }
     const term = $("waSearch").value.trim().toLowerCase();
     const keep = WA_FILTERS[waFilter].keep;
-    // Archived chats are hidden unless asked for: they are archived.
+    // Archived chats are hidden unless asked for: they are archived. A group
+    // you were removed from or walked out of is the same kind of thing — it
+    // is over, so it does not belong among the live conversations.
     const shown = waChats.filter((c) =>
       (waFilter === "archived" || !c.archived) &&
+      (waFilter === "left" || !c.left) &&
       keep(c) &&
       (!term || (c.name || "").toLowerCase().includes(term)));
 
     const rows = shown.map(waChatRow);
-    const summary = el("p", "wa-count",
-      shown.length === waChats.length
-        ? `${waChats.length} conversations`
-        : `${shown.length} of ${waChats.length} conversations`);
-    $("waList").replaceChildren(assistantRow(), summary, ...(rows.length
+    $("waCount").textContent = shown.length === waChats.length
+      ? `${waChats.length} chats`
+      : `${shown.length} of ${waChats.length}`;
+    $("waList").replaceChildren(assistantRow(), ...(rows.length
       ? rows
       : [note(term ? "Nothing matches that." : "Nothing in this filter.")]));
     markOpenRow($("assistantPane").hidden ? waChat : ASSISTANT);
@@ -1816,21 +2084,43 @@
   // On a narrow screen one column shows at a time; on a wide one both are
   // visible and this only decides which is emphasised.
   const waSplit = () => document.querySelector(".wa-split");
+  // Held on to rather than rebuilt: closing a conversation puts this same
+  // empty state back, instead of the bare line of text it used to leave.
+  const waPickEmpty = $("waPickEmpty");
 
   function openWa(id, name) {
     waChat = id;
     $("assistantPane").hidden = true;
     $("waPanel").hidden = false;
     $("waWho").textContent = name;
+    $("waWhoFace").replaceChildren(avatar(name, id));
     $("waBack").hidden = false;
     markOpenRow(id);
     waSplit().dataset.open = "thread";
+    pushThread();
     $("waPanel").replaceChildren(note("Opening…"));
     // Only the thread: the list is already on screen and unchanged.
     if (!waBusy) { waBusy = true; loadWaThread(true).finally(() => { waBusy = false; }); }
   }
 
-  $("waBack").onclick = () => {
+  // On a phone the list and the conversation are a screen each, so opening one
+  // is a navigation and the phone's own back gesture has to come back to the
+  // list rather than leave the dashboard altogether. Nothing is pushed on a
+  // wide screen, where both panes are visible and back would mean nothing.
+  //
+  // `window.history` spelled out: `history` is taken in this scope by the
+  // assistant's own transcript.
+  const onePane = () => window.matchMedia("(max-width: 900px)").matches;
+  function pushThread() {
+    if (onePane() && !(window.history.state || {}).waThread) {
+      window.history.pushState({ waThread: true }, "");
+    }
+  }
+  window.addEventListener("popstate", () => {
+    if (waSplit() && waSplit().dataset.open === "thread") backToList();
+  });
+
+  function backToList() {
     waChat = null;
     $("assistantPane").hidden = true;
     $("waPanel").hidden = false;
@@ -1838,10 +2128,19 @@
     $("waBack").hidden = true;
     $("waReply").hidden = true;
     $("waWho").textContent = "Pick a conversation";
+    $("waWhoFace").replaceChildren();
     waSplit().dataset.open = "list";
     // Instant: the list never went anywhere, so there is nothing to refetch.
-    $("waPanel").replaceChildren(note("Pick a conversation on the left to read it here."));
+    $("waPanel").replaceChildren(waPickEmpty);
     markOpenRow("");
+  }
+
+  // Going back through the button has to spend the history entry that opening
+  // the conversation pushed, or the phone's own back gesture would need two
+  // presses to leave a list that is already showing.
+  $("waBack").onclick = () => {
+    if ((window.history.state || {}).waThread) window.history.back();
+    else backToList();
   };
   // Drag the divider to give either side more room. Kept per browser, because
   // how much list you want is a matter of what you are doing right now.
