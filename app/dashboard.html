@@ -33,7 +33,7 @@
     --focus:#1a7a43;
   }
   @media (prefers-color-scheme:dark){
-    :root{
+    :root:not([data-theme="light"]){
       --bg:#0f1113; --surface:#17191c; --surface-raised:#1f2226;
       --border:#2a2d31; --text:#e8eaec; --text-muted:#9aa0a6;
       --primary:#3ba868; --primary-fg:#08120c; --primary-weak:#17281e;
@@ -41,6 +41,15 @@
       --focus:#3ba868;
       --e1:0 1px 2px rgba(0,0,0,.4); --e2:0 4px 12px rgba(0,0,0,.5);
     }
+  }
+  /* Chosen outright, whatever the system says. */
+  :root[data-theme="dark"]{
+    --bg:#0f1113; --surface:#17191c; --surface-raised:#1f2226;
+    --border:#2a2d31; --text:#e8eaec; --text-muted:#9aa0a6;
+    --primary:#3ba868; --primary-fg:#08120c; --primary-weak:#17281e;
+    --success:#3ba868; --warning:#d19a3e; --danger:#e5756b; --info:#6aa9d6;
+    --focus:#3ba868;
+    --e1:0 1px 2px rgba(0,0,0,.4); --e2:0 4px 12px rgba(0,0,0,.5);
   }
   *{box-sizing:border-box}
   [hidden]{display:none !important}
@@ -238,6 +247,11 @@
   .mrow.out{background:var(--surface-raised)}
   .mbody{min-width:0;flex:1}
   .mrow .from{margin-bottom:var(--s1)}
+  /* Said out loud, because on WhatsApp this went out under the owner's name. */
+  .by-ai{display:inline-block;margin-inline-start:var(--s2);padding:0 var(--s2);
+         border-radius:var(--r-pill);font-size:var(--f-xs);font-weight:700;
+         color:var(--primary-fg);background:var(--primary)}
+  .mrow.by-assistant{border-inline-start:3px solid var(--primary)}
   .listen{display:inline-block;margin-top:var(--s2);padding:var(--s1) var(--s3);font-size:var(--f-sm);font-weight:500;
           border-radius:var(--r-pill);color:var(--text);border:1px solid var(--border);background:var(--surface)}
   .listen:hover{background:var(--surface-raised)}
@@ -381,6 +395,7 @@
       <button id="wakeBtn" class="chip off" type="button" aria-pressed="false" title="Say the name to talk hands-free. Uses the browser's speech service (Chrome or Edge) while this page is open.">Say Arianna: Off</button>
       <button id="voiceBtn" class="chip on" type="button" aria-pressed="true" title="When on, what you dictate is sent right away and I answer out loud">Voice chat: On</button>
     </div>
+    <button id="themeBtn" class="chip plain" type="button" aria-label="Switch between light and dark">Theme</button>
     <button id="lockBtn" class="chip plain" type="button">Sign out</button>
   </header>
 
@@ -617,6 +632,24 @@
     e.currentTarget.textContent = show ? "Hide" : "Show";
     e.currentTarget.setAttribute("aria-pressed", String(show));
   };
+
+  // Three states on purpose: following the system is the right default, and
+  // "light" and "dark" are the overrides. Remembered per browser.
+  const THEMES = ["system", "light", "dark"];
+  let theme = "system";
+  try { theme = localStorage.getItem("theme") || "system"; } catch { /* private mode */ }
+  function applyTheme() {
+    if (theme === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+    const label = { system: "Theme: auto", light: "Theme: light", dark: "Theme: dark" };
+    $("themeBtn").textContent = label[theme];
+    try { localStorage.setItem("theme", theme); } catch { /* private mode */ }
+  }
+  $("themeBtn").onclick = () => {
+    theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+    applyTheme();
+  };
+  applyTheme();
 
   $("lockBtn").onclick = async () => {
     await fetch("/api/logout", { method: "POST" }).catch(() => {});
@@ -1045,15 +1078,22 @@
     if (!items.length) { wrap.append(note("No messages found.")); return wrap; }
     for (const m of items) {
       const out = m.direction === "out";
-      const row = el("div", `mrow ${out ? "out" : "in"}`);
+      const row = el("div", `mrow ${out ? "out" : "in"}${m.outcome === "auto" ? " by-assistant" : ""}`);
       const meta = el("div", "from");
-      meta.append(el("span", "who", `${out ? "You → " : ""}${m.name || "Unknown"}`),
-                  ` · ${fmtTime(m.ts)}${OUTCOME[m.outcome] ? " · " + OUTCOME[m.outcome] : ""}`);
+      // Who actually sent it. An auto-reply went out under the owner's name
+      // on WhatsApp, so on this screen it has to say otherwise — that is the
+      // whole point of looking.
+      const BY = { auto: ASSISTANT_NAME, held_sent: "You (approved)", dashboard: "You" };
+      const sender = out ? (BY[m.outcome] || "You") : null;
+      const who = el("span", "who", out ? `${sender} → ${m.name || "Unknown"}` : (m.name || "Unknown"));
+      meta.append(who, ` · ${fmtTime(m.ts)}`);
+      if (m.outcome === "auto") meta.append(el("span", "by-ai", "AI sent"));
+      else if (OUTCOME[m.outcome]) meta.append(` · ${OUTCOME[m.outcome]}`);
       const body = el("div", "", m.body);
       body.dir = "auto";
       const content = el("div", "mbody");
       content.append(meta, body);
-      row.append(avatar(m.name), content);
+      row.append(avatar(m.name, m.chat_id), content);
       wrap.append(row);
     }
     return wrap;

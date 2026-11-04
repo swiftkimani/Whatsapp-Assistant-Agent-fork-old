@@ -13,7 +13,17 @@ _last_purge = 0.0
 @contextmanager
 def _db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # Several people can be mid-conversation at once: the webhook runs the
+    # agent in a threadpool, so replies, memory writes and the message log
+    # overlap. On SQLite's defaults the second writer gets "database is
+    # locked" after five seconds and that person's reply is simply lost.
+    #
+    # WAL lets readers carry on while one writer commits, and the busy
+    # timeout makes a writer wait its turn instead of failing. Both are
+    # per-connection, so they are set here rather than once at startup.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.row_factory = sqlite3.Row
     try:
         yield conn

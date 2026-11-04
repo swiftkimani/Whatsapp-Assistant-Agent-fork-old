@@ -184,12 +184,12 @@ def test_setting_the_default_needs_the_password(client):
 def test_a_conversation_is_named_in_words_the_owner_recognises(signed_in, agent, fresh_db):
     """The fallback used to print the chat id's local part. For a privacy id
     that is fifteen opaque digits matching nothing the owner has ever seen."""
-    from app.controls import _readable_who
+    from app.controls import readable_who
 
     book = {"Kawira": "254712345678"}
-    assert _readable_who("254712345678@c.us", "", book) == "Kawira"      # known
-    assert _readable_who("254799999999@c.us", "", book) == "+254799999999"
-    assert _readable_who("112257593794569@lid", "", book) == "Unknown contact"
-    assert _readable_who("120363111122223333@g.us", "", book) == "A group"
-    assert _readable_who("", "", book) == "From this dashboard"
-    assert _readable_who("254799999999@c.us", "Otieno", book) == "Otieno"  # stored wins
+    assert readable_who("254712345678@c.us", "", book) == "Kawira"      # known
+    assert readable_who("254799999999@c.us", "", book) == "+254799999999"
+    assert readable_who("112257593794569@lid", "", book) == "Unknown contact"
+    assert readable_who("120363111122223333@g.us", "", book) == "A group"
+    assert readable_who("", "", book) == "From this dashboard"
+    assert readable_who("254799999999@c.us", "Otieno", book) == "Otieno"  # stored wins

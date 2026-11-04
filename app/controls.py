@@ -32,7 +32,7 @@ def time_bounds(label: str, now: datetime | None = None) -> tuple[float | None, 
     return None, None
 
 
-def _readable_who(chat_id: str, stored: str, book: dict[str, str]) -> str:
+def readable_who(chat_id: str, stored: str, book: dict[str, str]) -> str:
     """Who this was with, in words the owner recognises.
 
     The fallback used to be the chat id's local part. For a phone number that
@@ -61,7 +61,7 @@ def find_messages(contact: str | None, period: str, direction: str, limit: int =
     book = contacts.load()      # read once for the whole page, not per row
     return [{"ts": r["ts"], "direction": r["direction"], "body": r["body"], "outcome": r["outcome"],
              "chat_id": r["chat_id"] or "",
-             "name": _readable_who(r["chat_id"] or "", r["name"] or "", book)} for r in rows]
+             "name": readable_who(r["chat_id"] or "", r["name"] or "", book)} for r in rows]
 
 
 class ToggleRequest(BaseModel):
@@ -155,7 +155,14 @@ def change_mode(body: ModeRequest):
 def audit(limit: int = 50):
     limit = max(1, min(limit, 200))
     items = []
+    book = contacts.load()
     for r in db.recent_audit(limit):
-        name = contacts.name_for(r["target"]) if r["kind"] in _NAMED_KINDS and r["target"] else None
-        items.append({"ts": r["ts"], "kind": r["kind"], "target": "" if name else r["target"], "name": name})
+        target = r["target"] or ""
+        if r["kind"] in _NAMED_KINDS and target:
+            # A chat id. Resolve it, and never print the raw id as a fallback.
+            name = contacts.name_for(target, book=book) or readable_who(target, "", book)
+            items.append({"ts": r["ts"], "kind": r["kind"], "target": "", "name": name})
+        else:
+            # Not a chat id — a mode, a toggle state, a name. Safe as written.
+            items.append({"ts": r["ts"], "kind": r["kind"], "target": target, "name": None})
     return {"items": items}

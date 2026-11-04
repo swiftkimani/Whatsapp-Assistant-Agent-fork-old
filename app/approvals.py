@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app import contacts, db
+from app.controls import readable_who
 from app.log import log_event
 from app.dashboard import require_auth
 from app.memory import add_assistant_message
@@ -26,11 +27,12 @@ class SendRequest(BaseModel):
 @router.get("/api/held", dependencies=AUTH)
 def list_held():
     items = []
+    book = contacts.load()          # one read for the whole queue
     for r in db.pending():
-        name = contacts.name_for(r["chat_id"], r.get("number"))
+        name = contacts.name_for(r["chat_id"], r.get("number"), book=book)
         items.append({
             "id": r["id"], "chat_id": r["chat_id"],
-            "name": name, "from": name or r["chat_id"].split("@")[0],
+            "name": name, "from": readable_who(r["chat_id"] or "", name or "", book),
             "incoming": r["incoming"], "reply": r["reply"], "reason": r.get("reason") or "",
             "why": r.get("why") or "",
         })
