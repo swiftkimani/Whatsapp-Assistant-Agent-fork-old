@@ -50,6 +50,18 @@ services:
       DASHBOARD_WHISPER_SIZE: ${DASHBOARD_WHISPER_SIZE:-small}
       TTS_PROVIDER: ${TTS_PROVIDER:-edge}
       TZ: ${TZ:-Africa/Nairobi}
+
+      # ctranslate2 (faster-whisper) and torch both size their thread pools
+      # from the host's core count, so one voice note recruited every vCPU the
+      # VPS has — and then kept the memory. glibc gives each allocating thread
+      # a 64 MiB arena of its own and never takes one back, which is the
+      # likeliest explanation for the gap between the ~1.9 GiB of models and
+      # libraries this service can actually account for and the 3840 MiB the
+      # host's monitor reported. Two threads is slower per transcription and
+      # much cheaper per container, and on a host already 88% into swap the
+      # extra threads were buying latency that swapping took straight back.
+      OMP_NUM_THREADS: 2
+      MALLOC_ARENA_MAX: 2
     # Declared so Coolify's domain check can see the port uvicorn binds; the
     # port is reachable on the internal network either way, never published.
     expose:
@@ -58,6 +70,49 @@ services:
       - app-data:/app/data
       - model-cache:/models
     networks: [internal]
+    # Neither service was capped until the host's monitor reported 3840 MiB
+    # here, 3709 MiB in the bridge and 88% of swap in use. A machine that deep
+    # in swap is slow at everything, which is almost certainly what made
+    # /api/wa/chats take 3.4 seconds. A limit is a ceiling, not a request: it
+    # costs nothing until something tries to pass it.
+    #
+    # 2.5 GiB is what this service can justify, not a tidy figure. The
+    # interpreter with torch, transformers and ctranslate2 loaded measures
+    # ~250 MiB, and they are resident from boot rather than on demand, because
+    # app/main.py imports app.agent_graph, which imports app.stt and
+    # app.vision at module level. One faster-whisper "small" at int8 measured
+    # 610 MiB resident once loaded. BLIP captions images in fp32 — app/vision.py
+    # asks for no dtype — so its weights stay the ~1 GB app/download_blip.py
+    # warns about. That is ~1.9 GiB once one voice note and one photo have
+    # arrived, and it never comes back down: both model caches are module-level
+    # globals, held deliberately so the next message does not pay the load
+    # again. The remainder is room for a request's own buffers.
+    #
+    # So raising WHISPER_MODEL_SIZE or DASHBOARD_WHISPER_SIZE past "small"
+    # means raising this too: "medium" is roughly another 1.2 GiB, and
+    # app/stt.py keeps one loaded model per distinct size.
+    #
+    # cpus 1.5 because the only thing here that wants a core is a
+    # transcription, OMP_NUM_THREADS above holds that to two threads, and this
+    # serves one person sending one voice note at a time.
+    #
+    # The reservation is a floor, not an allocation: it tells the kernel which
+    # 1 GiB to leave alone when the host is under pressure, so the models that
+    # are already loaded are not the pages that get pushed into swap.
+    #
+    # The host is 6 cores and 11.7 GB (Coolify's server page, 2026-11-04), so
+    # these ceilings are set to cap the runaway rather than to ration a small
+    # machine: 3 GiB here and 3 GiB for the bridge is 6 of 11.7, which leaves
+    # Coolify itself and the page cache room to breathe. A ceiling under the
+    # real working set does not save memory, it turns a slow service into one
+    # the kernel keeps killing.
+    deploy:
+      resources:
+        limits:
+          memory: 3072m
+          cpus: "1.5"
+        reservations:
+          memory: 1024m
 
   bridge:
     build:
@@ -94,6 +149,51 @@ services:
       - app-data:/app/data
       - wa-session:/app/whatsapp-bridge/.wwebjs_auth
     networks: [internal]
+    # Chromium is the 3709 MiB the monitor warned about and the 200–280%
+    # sustained CPU beside it. Most of that was WhatsApp Web's own JavaScript
+    # heap: V8 sizes its old space from how much memory the machine appears to
+    # have, so on an uncapped container it had no reason to collect anything,
+    # and the chat store simply accumulated. index.js now passes
+    # --max-old-space-size=512 to bound it, which is what makes a 2 GiB ceiling
+    # plausible rather than optimistic — a renderer's non-heap side (Blink's own
+    # objects, decoded media) plus the browser process and node should land
+    # near 1.4 GiB.
+    #
+    # This is the number most likely to be wrong, because nothing here measured
+    # the real working set. That is deliberate: if the V8 cap does not bite, the
+    # container is OOM-killed and restarts, which is loud, costs a WhatsApp
+    # re-sync from the saved session rather than a re-link, and tells us within
+    # a day. A host sitting at 88% swap is the silent version of the same
+    # problem and degrades every request instead. Raise this to 2560m if the
+    # kernel starts killing it.
+    #
+    # No shm_size on purpose: it and --disable-dev-shm-usage (already in
+    # index.js) are two answers to the same question, and setting both just
+    # means Chromium ignores the tmpfs we paid for. Under a memory limit the
+    # flag is the better of the two — a tmpfs /dev/shm is charged to this
+    # container's memory cgroup, so a 512m one would spend a quarter of the
+    # ceiling on shared memory and turn a renderer allocation into an OOM kill,
+    # whereas the flag's files land on the container filesystem as page cache
+    # the kernel can reclaim.
+    #
+    # 3 GiB rather than the 2 GiB this was first set to. Both numbers cap the
+    # 3709 MiB the monitor saw, so both stop the runaway; the difference is
+    # what happens if --max-old-space-size does not bite. At 2 GiB that is an
+    # OOM kill during the initial WhatsApp Web sync, which is the one failure
+    # that could loop — killed before it is ever ready, restarted, killed
+    # again. On a machine with 11.7 GB there is no reason to take that bet to
+    # save a gigabyte nothing else is asking for.
+    #
+    # cpus 2, not 1.5: this was sustaining 200–280% of one core, so 1.5 would
+    # have cut the initial sync roughly in half for no gain on a 6-core host.
+    # It still holds the container to a third of the machine.
+    deploy:
+      resources:
+        limits:
+          memory: 3072m
+          cpus: "2"
+        reservations:
+          memory: 512m
 
 volumes:
   # The SQLite database, held queue, your notes and contacts.json.

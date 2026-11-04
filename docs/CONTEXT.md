@@ -560,6 +560,63 @@ The other record, which already existed, is the Messages tab: every row is
 labelled *auto-reply*, *sent after your approval* or *sent from this
 dashboard*.
 
+## Resource limits, and where the memory actually goes (2026-11-04)
+
+The host's monitor reported both containers running uncapped — backend at
+3840 MiB, bridge at 3709 MiB — with the host 88% into swap. A machine that
+deep in swap is slow at everything, and that is the likeliest reason
+`/api/wa/chats` took 3.4 seconds. What changed:
+
+- **`docker-compose.yaml` now sets `deploy.resources` on both services**:
+  backend 2560m / 1.5 cpus with a 1 GiB reservation, bridge 2048m / 1.5 cpus
+  with a 512 MiB reservation. The reasoning for each number is written beside
+  it in the file. Compose v2 applies `deploy.resources.limits` on a non-Swarm
+  engine, which is how Coolify deploys; if `docker inspect` shows
+  `HostConfig.Memory: 0` after a deploy, the legacy `mem_limit` / `cpus` keys
+  are the same thing in a form no Compose version ever ignored.
+- **The backend's 3.8 GiB is resident models plus allocator retention, not a
+  leak.** `app/main.py` imports `app.agent_graph`, which imports `app.stt` and
+  `app.vision` at module level, so torch, transformers and ctranslate2 are
+  loaded from boot — measured at ~250 MiB. One faster-whisper "small" at int8
+  measured 610 MiB resident. BLIP runs in fp32 because `app/vision.py` asks for
+  no dtype, so it holds the ~1 GB of weights `app/download_blip.py` warns
+  about. Both caches are module-level globals and release nothing, by design.
+  That accounts for ~1.9 GiB; the rest is most consistent with glibc arenas,
+  which is why `OMP_NUM_THREADS=2` and `MALLOC_ARENA_MAX=2` are now set — torch
+  and ctranslate2 otherwise size their thread pools from the host's core count
+  and every allocating thread gets its own 64 MiB arena that is never returned.
+- **The bridge's 3.7 GiB was mostly V8.** `index.js` now passes
+  `--js-flags=--max-old-space-size=512`: an uncapped container looks like the
+  whole VPS to V8, so WhatsApp Web's chat store accumulated with nothing ever
+  pressing a collection. Also added `--disable-background-networking` (the
+  component updater downloads and unpacks on a schedule in a container that
+  should only talk to web.whatsapp.com) and `--disable-software-rasterizer`
+  (`--disable-gpu` alone leaves the SwiftShader fallback to load).
+- **No `shm_size`.** It and `--disable-dev-shm-usage`, which was already there,
+  answer the same question, and under a memory limit the flag is the better of
+  the two: a tmpfs `/dev/shm` is charged to the container's own memory cgroup.
+
+`critical: bridge: not running (state created)` is explained by the same
+pressure and needs no separate fix. The bridge waits on
+`depends_on: backend: service_healthy`, and the backend's healthcheck allows
+5 s per probe and 3 retries — on a host this deep in swap a `/health` that
+blows that three times running marks the backend unhealthy, and Compose then
+creates the bridge container and never starts it. If it recurs once the limits
+are in, the two one-line options are a longer healthcheck timeout in
+`Dockerfile` or `service_started` instead of `service_healthy`; both are
+judgement calls about whether the bridge may run ahead of the backend, so
+neither was taken here.
+
+The repeated `container no longer exists` criticals in the same feed are
+redeploy churn — each redeploy names a new container and the old one goes —
+and are not a fault.
+
+Not verified: none of these numbers was measured on the VPS. The 610 MiB and
+250 MiB figures are from loading the same pinned versions locally; the bridge's
+2048m is the reasoned one and the first to raise if the kernel starts killing
+it (an OOM kill there costs a WhatsApp re-sync from the saved session, not a
+re-link).
+
 ## Decisions
 - ADR-0001 Multi-tenancy: a container per tenant, not a tenant column.
   **Proposed, not started** — the blocking question is RAM per tenant
