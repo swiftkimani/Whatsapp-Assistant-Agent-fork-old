@@ -118,7 +118,16 @@ console.log(`Using WhatsApp Web version ${WA_WEB_VERSION}`);
 // eight characters, lasts about three minutes, and is typed in by hand.
 // Set PAIRING_NUMBER to the number of the account being linked, digits only.
 const PAIRING_NUMBER = (process.env.PAIRING_NUMBER || "").replace(/\D/g, "");
-let pairingRequested = false;
+
+// Asking WhatsApp for a pairing code is rate limited — the linking API carries
+// a MaxPrimaryHelloError for exactly that. A failed request used to clear the
+// guard, so the next "qr" event asked again, and those arrive every twenty
+// seconds: one transient failure turned into thousands of requests and a cap
+// that could never decay while the bridge was running. Back off instead, and
+// widen the gap each time, so a refusal costs minutes rather than the account.
+const PAIRING_BACKOFF_MS = [5, 15, 30, 60].map((m) => m * 60 * 1000);
+let pairingAttempts = 0;
+let pairingBlockedUntil = 0;
 
 // Whether this account is linked, and the code to link it with. Shared with
 // the API, which reads it on every request. A server has nowhere to show a QR
@@ -142,14 +151,23 @@ client.on("qr", async (qr) => {
   }
   // The QR event is the signal that the client is ready to pair; ask once, then
   // let WhatsApp refresh the code on its own interval via the "code" event.
-  if (pairingRequested) return;
-  pairingRequested = true;
+  if (Date.now() < pairingBlockedUntil) return;
+  pairingBlockedUntil = Infinity;              // nothing else asks while this one is in flight
   try {
     announcePairingCode(await client.requestPairingCode(PAIRING_NUMBER));
+    pairingAttempts = 0;
   } catch (err) {
-    pairingRequested = false;
-    console.error("Could not request a pairing code:", err.message);
-    console.log("Falling back to the QR code:");
+    const wait = PAIRING_BACKOFF_MS[Math.min(pairingAttempts, PAIRING_BACKOFF_MS.length - 1)];
+    pairingAttempts += 1;
+    pairingBlockedUntil = Date.now() + wait;
+    // The thrown value is minified by WhatsApp's own bundle, so the name is
+    // usually more use than the message — MaxPrimaryHelloError means the
+    // account has been asked too often and needs to be left alone a while.
+    const named = [err && err.name, err && err.message].filter(Boolean).join(": ");
+    console.error(`Could not request a pairing code (${named || "unknown"}). ` +
+                  `Next attempt in ${Math.round(wait / 60000)} min.`);
+    link.stage = `pairing code refused; retrying in ${Math.round(wait / 60000)} min`;
+    console.log("Scan the QR on the dashboard instead:");
     qrcode.generate(qr, { small: true });
   }
 });
@@ -189,14 +207,15 @@ client.on("ready", () => {
   link.qr = null;              // nothing left to scan
   link.stage = "linked";
   link.error = null;
-  pairingRequested = false;    // so a later disconnect can ask again
+  pairingAttempts = 0;
+  pairingBlockedUntil = 0;
 });
 
 client.on("disconnected", (reason) => {
   console.log(`WhatsApp disconnected: ${reason}`);
   link.linked = false;
   link.stage = `disconnected: ${reason}`;
-  pairingRequested = false;
+  pairingBlockedUntil = 0;
 });
 
 // The API used to start on "ready", so an unlinked bridge answered nothing at
