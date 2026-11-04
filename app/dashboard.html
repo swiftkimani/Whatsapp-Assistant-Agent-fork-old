@@ -1426,7 +1426,10 @@
   async function loadWaChats() {
     if (await showLinkIfNeeded()) return;
     try {
-      const { chats } = await api("/api/wa/chats?limit=25");
+      // 25 was the bridge's own default and showed a fraction of a real
+      // account. Reading chats drives the browser session, so this is a
+      // trade of a slower first load for a list that is actually usable.
+      const { chats } = await api("/api/wa/chats?limit=100");
       const unread = chats.reduce((n, c) => n + c.unread, 0);
       const badge = $("waUnread");
       badge.textContent = unread > 99 ? "99+" : String(unread);

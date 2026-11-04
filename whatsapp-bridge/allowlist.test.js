@@ -152,3 +152,28 @@ test("an @lid that cannot be resolved is answered rather than dropped under anyo
   });
   assert.strictEqual(res.allowed, true, "failing to resolve a name must not cost the reply");
 });
+
+
+// ---- what counts as a conversation at all ----
+
+test("a status update is never a conversation, even under anyone", async () => {
+  // A friend posting a story used to reach the agent, which wrote a reply the
+  // library then tried to post AS a status — and that throws on current
+  // WhatsApp builds, taking the send path down with it.
+  const res = await checkAllowed("status@broadcast", { allowed: ["anyone"], allowGroups: false });
+  assert.strictEqual(res.allowed, false);
+  assert.strictEqual(res.reason, "not_a_conversation");
+});
+
+test("channels and broadcast lists are refused the same way", async () => {
+  for (const id of ["abc@newsletter", "1234@broadcast", "@c.us", "nonsense"]) {
+    const res = await checkAllowed(id, { allowed: ["anyone"], allowGroups: true });
+    assert.strictEqual(res.allowed, false, `${id} should not be a conversation`);
+  }
+});
+
+test("real conversations are still allowed under anyone", async () => {
+  for (const id of ["254712345678@c.us", "112257593794569@lid"]) {
+    assert.strictEqual((await checkAllowed(id, { allowed: ["anyone"] })).allowed, true, id);
+  }
+});

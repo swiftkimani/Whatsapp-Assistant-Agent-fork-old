@@ -48,6 +48,19 @@ async function checkAllowed(chatId, { allowed, allowGroups, resolveContact, addr
       return { allowed: false, number: "", kind: "unknown", reason: "address_book_unreadable" };
     }
   }
+  // A status update, a channel or a broadcast list is not a conversation, and
+  // replying into one is not a thing the library can even do: sendMessage to
+  // status@broadcast takes a status-posting path that throws on current
+  // WhatsApp builds. Number matching used to exclude these as a side effect,
+  // because they carry no digits to match; "anyone" skipped that check and let
+  // them through, so a friend posting a story produced a reply attempt.
+  // Digits, optionally a ":12" device suffix or a legacy group's
+  // "-1497087597" creator stamp. The point is the domain and a numeric local
+  // part, which "status@broadcast" and "...@newsletter" both fail.
+  if (!/^\d[\d:-]*@(c\.us|lid|g\.us)$/.test(from)) {
+    return { allowed: false, number: "", kind: "not_a_chat", reason: "not_a_conversation" };
+  }
+
   const kind = from.endsWith("@g.us") ? "group" : from.endsWith("@lid") ? "lid" : "direct";
 
   // Drop the device suffix BEFORE stripping punctuation. On multi-device

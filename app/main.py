@@ -46,7 +46,16 @@ def _digits(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+# Direct chats, privacy ids and groups are conversations. A status update, a
+# channel or a broadcast list is not, and the bridge cannot reply into one.
+# Digits, optionally a ":12" device suffix or a legacy group's "-1497087597"
+# creator stamp. "status@broadcast" and "...@newsletter" fail on the domain.
+CONVERSATION_ID = re.compile(r"^\d[\d:-]*@(c\.us|lid|g\.us)$")
+
+
 def is_allowed(contact_id: str, number: str | None = None) -> bool:
+    if not CONVERSATION_ID.match(contact_id or ""):
+        return False
     if contact_id.endswith("@g.us") and not ALLOW_GROUPS:
         return False
 

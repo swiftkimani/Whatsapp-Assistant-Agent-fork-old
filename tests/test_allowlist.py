@@ -82,3 +82,14 @@ def test_a_resolved_lid_number_is_what_gets_compared(allow):
 def test_a_chat_id_with_no_digits_is_refused(allow):
     allow("254712345678")
     assert not main.is_allowed("@c.us")
+
+
+def test_a_status_update_is_not_a_conversation(allow):
+    """It reached the agent under "anyone", which generated a reply the bridge
+    then tried to post as a status — a path that throws on current WhatsApp
+    builds. Number matching had excluded these only by accident, because they
+    carry no digits to match."""
+    allow("anyone")
+    assert not main.is_allowed("status@broadcast")
+    assert not main.is_allowed("abc@newsletter")
+    assert main.is_allowed("254712345678@c.us")
