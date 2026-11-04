@@ -16,13 +16,20 @@ LOCAL_TZ = ZoneInfo(os.getenv("TZ", "Africa/Nairobi"))
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-5-5")
 
 # Thinking cannot be disabled on this model family, so effort is the only depth
-# control. "medium" is the model default; raise it if the eval set shows unsafe
-# sends, lower it for faster, cheaper replies.
-EFFORT = os.getenv("ANTHROPIC_EFFORT", "medium")
+# control. "high" buys more of it: the replies worth sending are the ones that
+# needed the sender's history, the schedule and the redirect rules weighed
+# together, and that is what the extra thinking is spent on. Lower it for
+# faster, cheaper replies.
+EFFORT = os.getenv("ANTHROPIC_EFFORT", "high")
 
 # Thinking tokens are drawn from max_tokens, so this is far above the one line
 # of reply we actually want. Only tokens really generated are billed.
-MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
+#
+# It has to rise with the effort above. A reply that runs out of budget leaves
+# no answer at all, and _parse_answer turns that into a hold — so too small a
+# ceiling does not degrade the reply, it silently stops replying altogether.
+# That already happened once here at 400.
+MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "8192"))
 
 KB_PATH = Path(__file__).resolve().parent.parent / "data" / "kb" / "about_me.md"
 STYLE_EXAMPLES_PATH = Path(__file__).resolve().parent.parent / "data" / "style_examples.md"
