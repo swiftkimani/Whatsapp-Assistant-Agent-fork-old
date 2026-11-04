@@ -33,6 +33,55 @@ const CHAT_ID = /^\d[\d:-]*@(c\.us|lid|g\.us)$/;
 // characters allowed there are wider than the ids this machine happens to see.
 const MESSAGE_ID = /^(?:true|false)_\d[\d:-]*@(?:c\.us|lid|g\.us)_[A-Za-z0-9=-]{4,128}(?:_\d[\d:-]*@(?:c\.us|lid))?$/;
 
+// A reaction is one emoji and nothing besides. It is checked rather than
+// passed through for the reason a quoted id is: this string is handed to the
+// browser page, and a page is no place to send whatever a request happened to
+// carry.
+//
+// One grapheme cluster is the whole rule. That is what "one emoji" means once
+// skin tones, variation selectors and the zero-width joiners inside a family
+// emoji are counted, and it is the unit WhatsApp's own picker hands out:
+// a family is seven code points and one cluster, while two thumbs-up are two
+// clusters and are refused, because WhatsApp keeps one reaction per person
+// per message and the second would simply be dropped. Counting clusters is
+// also why there is no length limit in characters here — a bound in
+// characters is either too small for a legitimate emoji or large enough to
+// be no bound at all.
+//
+// The code points allowed are the pieces an emoji is built from: the pictures
+// themselves, the skin-tone modifiers, the pair of regional indicators a flag
+// is made of, the tag characters a subdivision flag adds, the zero-width
+// joiner, the emoji variation selector, the enclosing keycap, and the digits
+// and symbols a keycap is built on. Letters, punctuation and whitespace are
+// not among them, so nothing that could read as text, markup or code gets
+// as far as the page.
+const EMOJI_PIECES = /^[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\u200D\uFE0F\u20E3#*0-9\u{E0020}-\u{E007F}]+$/u;
+// At least one of those pieces has to be a picture, or "123" — three keycap
+// bases with no keycaps on them — would pass as a reaction.
+const EMOJI_PICTURE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u;
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Whether this is something WhatsApp will take as a reaction.
+ *
+ * The empty string is deliberately valid. That is how the library removes a
+ * reaction — Message.react("") — so "remove my reaction" is the same call
+ * with nothing in it rather than a route of its own, and the dashboard has
+ * one thing to call either way.
+ */
+function isReactionEmoji(value) {
+  if (typeof value !== "string") return false;
+  if (value === "") return true;
+  if (!EMOJI_PIECES.test(value) || !EMOJI_PICTURE.test(value)) return false;
+  return Array.from(GRAPHEMES.segment(value)).length === 1;
+}
+
+// How long a pinned message stays pinned, in seconds, under the names
+// WhatsApp's own menu gives them. It offers exactly these three and nothing
+// between, and the library hands the number straight to the page, so a fourth
+// value would be one no WhatsApp client ever produces.
+const PIN_DURATIONS = { "24h": 86400, "7d": 604800, "30d": 2592000 };
+
 // What the dashboard can render itself, and in which element. Anything not
 // here keeps its written label: a document or a contact card is a file, not
 // something to show inline, and guessing at one would break the layout.
@@ -240,6 +289,63 @@ function quotedOf(msg, me) {
   };
 }
 
+// How long after a message was sent WhatsApp will still take it back from
+// everybody: two days and twelve hours, WhatsApp's own published figure.
+//
+// Not a constant the library exposes. The real test lives in the page, in
+// WAWebMsgActionCapability, and the library consults it without ever saying
+// what it found — so this number is a restatement of somebody else's rule,
+// and the day WhatsApp moves it this line is the one that has to change.
+const REVOKE_WINDOW_SECONDS = 2 * 86400 + 12 * 3600;
+
+/** Whether a message sits in a group conversation. Read off the chat its own
+ *  id names, since a message is not handed the chat it came from: the id
+ *  carries the chat under `remote`, and a message that arrived without one is
+ *  placed by the serialized id it was built from, or by `from`. */
+function inGroup(msg) {
+  const id = (msg && msg.id) || {};
+  const remote = typeof id.remote === "string"
+    ? id.remote
+    : String((id.remote && (id.remote._serialized || id.remote.$1)) || "");
+  const named = remote
+    || (typeof id._serialized === "string" ? id._serialized : "")
+    || String((msg && msg.from) || "");
+  return /@g\.us\b/.test(named);
+}
+
+/**
+ * Whether "delete for everyone" is still worth offering for this message.
+ *
+ * WhatsApp settles this in the page and the library does not pass the answer
+ * back: Message.delete(true) on a message that can no longer be revoked
+ * quietly deletes it for this device only and resolves as though it had done
+ * what was asked. There is therefore no failure to catch afterwards, and the
+ * only honest moment to answer is before — which is the whole reason this is
+ * derived here rather than left to the attempt.
+ *
+ * Deliberately cautious wherever the message alone cannot settle it:
+ *   - a message already revoked has nothing left to take back;
+ *   - a message with no timestamp cannot be placed inside the window at all;
+ *   - in a one-to-one chat only the sender can revoke, so somebody else's
+ *     message is never revocable there however recent it is;
+ *   - in a group an admin can revoke anyone's message, and whether the owner
+ *     is an admin is not on the message. That answers yes, because the cost
+ *     of being wrong is an action that silently does the smaller thing,
+ *     against the cost of hiding an action a group's admin really does have.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.now] seconds since the epoch, so a thread can be
+ *        shaped against a fixed clock in a test instead of the wall clock.
+ */
+function canDeleteForEveryone(msg, { now = Math.floor(Date.now() / 1000),
+                                     windowSeconds = REVOKE_WINDOW_SECONDS } = {}) {
+  if (!msg || String(msg.type || "") === "revoked") return false;
+  const ts = Number(msg.timestamp) || 0;
+  if (!ts) return false;
+  if (now - ts > Math.max(0, windowSeconds)) return false;
+  return Boolean(msg.fromMe) || inGroup(msg);
+}
+
 /**
  * @param {object} [opts]
  * @param {Set<string>} [opts.blocked] ids the owner has blocked. Their chats
@@ -319,8 +425,12 @@ function shapeChats(chats, { limit = DEFAULT_CHATS, blocked = new Set(), me = ""
  * @param {string} [opts.me] the owner's own id, for the same reason as in
  *        shapeChats: without it a removal inside a thread can only be read
  *        impersonally.
+ * @param {number} [opts.now] seconds since the epoch, passed through to the
+ *        one field that depends on how old a message is. Only a test has any
+ *        reason to set it; the wall clock is the right answer in production.
  */
-function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "" } = {}) {
+function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "",
+                                   now = Math.floor(Date.now() / 1000) } = {}) {
   return (messages || [])
     .filter(Boolean)
     .map((msg) => ({
@@ -360,6 +470,27 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "" } = {}) {
       // still that has to be clicked.
       is_gif: Boolean(msg.isGif),
       forwarded: Boolean(msg.isForwarded),
+      // Whether anybody has reacted to this. The emoji themselves are not
+      // here: WhatsApp keeps reactions in a collection of their own, and the
+      // library's only road to them — Message.getReactions() — is a browser
+      // round trip for one message, which is fifty of them to open a thread
+      // most of whose messages nobody reacted to. So the menu is told there
+      // is something to show and can ask for it when the owner opens it,
+      // the way /media is asked for rather than bundled.
+      has_reaction: Boolean(msg.hasReaction),
+      // Starred — "Keep" in WhatsApp's own menu. This one is genuinely on the
+      // message data, as `star`, so knowing it costs nothing.
+      //
+      // Pinned is not, and so is not reported: WhatsApp keeps pins in a table
+      // of their own, and the library reads them a whole chat at a time
+      // (Client.getPinnedMessages) rather than per message. Saying nothing is
+      // better than a field that is false because nobody looked.
+      starred: Boolean(msg.isStarred),
+      // Whether offering "delete for everyone" would be honest. The library
+      // will not refuse a revoke it cannot perform — it silently deletes the
+      // message for this device only — so the menu has to decide beforehand
+      // whether to grey the action out.
+      can_delete_for_everyone: canDeleteForEveryone(msg, { now }),
       // The message this one is answering, so a reply reads as a reply rather
       // than as an answer to nothing in particular — which is how a thread of
       // one-word agreements reads with the quotes stripped out of it.
@@ -372,5 +503,7 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "" } = {}) {
 module.exports = {
   shapeChats, shapeMessages, mediaLabel, chatName, renderAs,
   idParts, sameAccount, hasLeftGroup, groupEvent,
+  isReactionEmoji, inGroup, canDeleteForEveryone,
   CHAT_ID, MESSAGE_ID, DEFAULT_CHATS, DEFAULT_MESSAGES,
+  PIN_DURATIONS, REVOKE_WINDOW_SECONDS,
 };

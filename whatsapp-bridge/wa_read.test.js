@@ -1,6 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const { shapeChats, shapeMessages, MESSAGE_ID } = require("./wa_read");
+const { after } = require("node:test");
+const { shapeChats, shapeMessages, MESSAGE_ID, isReactionEmoji,
+  canDeleteForEveryone, PIN_DURATIONS, REVOKE_WINDOW_SECONDS } = require("./wa_read");
+const { startBridgeApi } = require("./bridge_api");
 
 const chat = (over = {}) => ({
   id: { _serialized: "254712345678@c.us" },
@@ -555,4 +558,415 @@ test("a message id is recognised by its real shape, and junk is refused", () => 
     "true_254712345678@c.us_3EB0AA11BB22_254722000111@g.us",   // a group cannot be the author
     `true_254712345678@c.us_${"A".repeat(200)}`,
   ]) assert.ok(!MESSAGE_ID.test(junk), JSON.stringify(junk));
+});
+
+
+// ---- the state WhatsApp's own message menu needs to draw itself ----
+
+const NOW = 1_700_000_000;
+const menuMsg = (over = {}) => ({
+  id: { _serialized: `false_${"254712345678@c.us"}_3EB0AA11BB22`, remote: "254712345678@c.us" },
+  timestamp: NOW, fromMe: false, type: "chat", body: "niaje",
+  ...over,
+});
+
+test("a message says whether it is kept and whether anybody reacted", () => {
+  const [m] = shapeMessages([menuMsg({ isStarred: true, hasReaction: true })], { now: NOW });
+  assert.strictEqual(m.starred, true);
+  assert.strictEqual(m.has_reaction, true);
+  const [plain] = shapeMessages([menuMsg()], { now: NOW });
+  assert.strictEqual(plain.starred, false);
+  assert.strictEqual(plain.has_reaction, false);
+});
+
+test("pinned state is not reported at all, because it is not on the message", () => {
+  // WhatsApp keeps pins in a table of their own and the library reads them a
+  // whole chat at a time, so a `pinned` field here could only ever be false
+  // because nobody looked. An absent field is the honest one: the menu can
+  // ask the bridge to pin or unpin without being told a lie about the state.
+  const [m] = shapeMessages([menuMsg()], { now: NOW });
+  assert.ok(!("pinned" in m), "a pinned field would be false for every message");
+});
+
+test("the reaction emoji themselves are not shaped in, only that there are some", () => {
+  // Reading them is Message.getReactions(), which is a browser round trip for
+  // one message — fifty of them to open one thread.
+  const [m] = shapeMessages([menuMsg({ hasReaction: true })], { now: NOW });
+  assert.ok(!("reactions" in m));
+  assert.strictEqual(m.has_reaction, true);
+});
+
+test("delete for everyone is offered inside WhatsApp's window and not outside it", () => {
+  const mine = (age) => menuMsg({ fromMe: true, timestamp: NOW - age });
+  assert.strictEqual(canDeleteForEveryone(mine(60), { now: NOW }), true);
+  assert.strictEqual(canDeleteForEveryone(mine(REVOKE_WINDOW_SECONDS), { now: NOW }), true);
+  assert.strictEqual(canDeleteForEveryone(mine(REVOKE_WINDOW_SECONDS + 1), { now: NOW }), false);
+  // Through the shaping, which is where the menu reads it.
+  const [m] = shapeMessages([mine(REVOKE_WINDOW_SECONDS + 1)], { now: NOW });
+  assert.strictEqual(m.can_delete_for_everyone, false);
+});
+
+test("in a one-to-one chat only the sender can take a message back", () => {
+  assert.strictEqual(canDeleteForEveryone(menuMsg(), { now: NOW }), false);
+});
+
+test("in a group somebody else's message is still offered, because an admin can", () => {
+  // Whether the owner is an admin is not on the message, and hiding an action
+  // a group's admin really does have is the worse of the two mistakes.
+  const inside = menuMsg({
+    id: { _serialized: "false_120363000000000001@g.us_3EB0AA11BB22",
+          remote: "120363000000000001@g.us" },
+    author: "254722000111@c.us",
+  });
+  assert.strictEqual(canDeleteForEveryone(inside, { now: NOW }), true);
+});
+
+test("a message already deleted, or with no timestamp, is not offered", () => {
+  assert.strictEqual(canDeleteForEveryone(menuMsg({ fromMe: true, type: "revoked" }),
+                                          { now: NOW }), false);
+  assert.strictEqual(canDeleteForEveryone(menuMsg({ fromMe: true, timestamp: 0 }),
+                                          { now: NOW }), false);
+  assert.strictEqual(canDeleteForEveryone(null, { now: NOW }), false);
+});
+
+
+// ---- what counts as a reaction ----
+
+test("the quick-reaction bar and the rest of the picker are accepted", () => {
+  // The six WhatsApp offers without opening the picker, then the shapes the
+  // "+" can produce: a skin tone, a family built out of joiners, a keycap and
+  // a flag made of two regional indicators.
+  for (const emoji of ["\u{1F44D}", "❤️", "\u{1F602}", "\u{1F62E}", "\u{1F622}",
+                       "\u{1F64F}", "\u{1F44D}\u{1F3FD}",
+                       "\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}",
+                       "1️⃣", "\u{1F1F0}\u{1F1EA}"]) {
+    assert.ok(isReactionEmoji(emoji), JSON.stringify(emoji));
+  }
+});
+
+test("an empty reaction is how one is taken off again", () => {
+  // Message.react("") is the library's own way to remove a reaction, so the
+  // menu's "remove" is this route with nothing in it rather than a route of
+  // its own.
+  assert.ok(isReactionEmoji(""));
+});
+
+test("anything that is not one emoji is refused before it reaches the page", () => {
+  for (const junk of [
+    "a", "hello", "123", " ", "\u{1F44D} ", "\u{1F44D}x",
+    "\u{1F44D}\u{1F44D}",                 // two reactions; WhatsApp keeps one
+    "<script>alert(1)</script>",
+    "'); DROP TABLE", "\u{1F44D}\n", "\u0000",
+    "\u{1F44D}".repeat(40),
+    null, undefined, 1, {}, [], true,
+  ]) assert.ok(!isReactionEmoji(junk), JSON.stringify(junk));
+});
+
+test("the pin durations are WhatsApp's own three and nothing between them", () => {
+  assert.deepStrictEqual(PIN_DURATIONS, { "24h": 86400, "7d": 604800, "30d": 2592000 });
+});
+
+
+// ---- the routes the menu calls ----
+//
+// Driven against the real server, because what wants testing here is the
+// order of the checks and the shape of the refusals, and neither of those
+// lives in a function that can be called on its own. The client is a stub:
+// whatsapp-web.js needs a real Chromium and a linked account, and none of
+// this needs either.
+
+const CHAT = "254712345678@c.us";
+const MSG = `false_${CHAT}_3EB0C767D097F5A2C7C1`;
+const TOKEN = "token-for-tests";
+
+// What the stub was asked to do. Emptied at the start of every test, so a
+// test that expects nothing to have happened can say so.
+let calls = [];
+
+const stubMessage = (over = {}) => ({
+  id: { _serialized: MSG, remote: CHAT },
+  fromMe: false,
+  type: "chat",
+  timestamp: Math.floor(Date.now() / 1000),
+  react: async (emoji) => { calls.push(["react", emoji]); },
+  forward: async (to) => { calls.push(["forward", to]); },
+  star: async () => { calls.push(["star"]); },
+  unstar: async () => { calls.push(["unstar"]); },
+  pin: async (seconds) => { calls.push(["pin", seconds]); return pinAnswer; },
+  unpin: async () => { calls.push(["unpin"]); return pinAnswer; },
+  delete: async (everyone) => { calls.push(["delete", everyone]); },
+  ...over,
+});
+
+// Swapped per test, so one test can say "there is no such message" and
+// another "that message is in a different chat" without a second server.
+let currentMessage = stubMessage();
+let knownChats = new Set([CHAT]);
+let pinAnswer = true;
+
+const stubClient = {
+  info: { wid: { _serialized: "254733000222@c.us" } },
+  getMessageById: async () => currentMessage,
+  getChatById: async (id) => (knownChats.has(id) ? { id: { _serialized: id } } : null),
+};
+
+process.env.BRIDGE_API_TOKEN = TOKEN;
+process.env.BRIDGE_API_PORT = "0";   // let the operating system pick one
+const server = startBridgeApi(stubClient, { linked: true, qr: null });
+const listening = new Promise((resolve) => {
+  if (server.listening) return resolve();
+  server.once("listening", resolve);
+});
+after(() => {
+  // fetch keeps its sockets alive, so closing the listener is not enough to
+  // let the test process exit.
+  server.closeAllConnections();
+  server.close();
+});
+
+/** Reset the stub and POST one request, the way the dashboard would. */
+async function post(path, body, { token = TOKEN } = {}) {
+  await listening;
+  const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-bridge-token": token },
+    body: JSON.stringify(body),
+  });
+  return { code: res.status, body: await res.json() };
+}
+
+function fresh(over = {}) {
+  calls = [];
+  knownChats = new Set([CHAT]);
+  pinAnswer = true;
+  currentMessage = stubMessage(over);
+}
+
+const MENU = ["/react", "/forward", "/star", "/pin-message", "/delete-message"];
+// One request per route that is valid apart from whatever the test is about.
+const enough = {
+  "/react": { emoji: "\u{1F44D}" },
+  "/forward": { to_chat_id: CHAT },
+  "/star": { starred: true },
+  "/pin-message": { pinned: true, duration: "24h" },
+  "/delete-message": { scope: "me" },
+};
+
+test("every message action needs the shared token", async () => {
+  for (const path of MENU) {
+    fresh();
+    const res = await post(path, { chat_id: CHAT, msg_id: MSG, ...enough[path] },
+                           { token: "wrong" });
+    assert.strictEqual(res.code, 401, path);
+    assert.deepStrictEqual(calls, [], path);
+  }
+});
+
+test("every message action names both the chat and the message", async () => {
+  for (const path of MENU) {
+    for (const [body, error] of [
+      [{ msg_id: MSG }, "bad chat id"],
+      [{ chat_id: "status@broadcast", msg_id: MSG }, "bad chat id"],
+      [{ chat_id: CHAT }, "bad message id"],
+      [{ chat_id: CHAT, msg_id: CHAT }, "bad message id"],
+      [{ chat_id: CHAT, msg_id: `${MSG};rm -rf /` }, "bad message id"],
+    ]) {
+      fresh();
+      const res = await post(path, { ...body, ...enough[path] });
+      assert.strictEqual(res.code, 400, `${path} ${JSON.stringify(body)}`);
+      assert.strictEqual(res.body.error, error, `${path} ${JSON.stringify(body)}`);
+      assert.deepStrictEqual(calls, [], path);
+    }
+  }
+});
+
+test("a message in another chat is refused, whichever action it was", async () => {
+  // The whole point of taking the chat id as well as the message id: an id on
+  // its own names a message in any conversation this session can reach, and
+  // reacting to, forwarding or deleting the wrong one cannot be taken back.
+  for (const path of MENU) {
+    fresh({ id: { _serialized: MSG, remote: "254700000000@c.us" } });
+    const res = await post(path, { chat_id: CHAT, msg_id: MSG, ...enough[path] });
+    assert.strictEqual(res.code, 400, path);
+    assert.strictEqual(res.body.error, "message is from another chat", path);
+    assert.deepStrictEqual(calls, [], path);
+  }
+});
+
+test("a message WhatsApp does not have is a 404, whichever action it was", async () => {
+  for (const path of MENU) {
+    fresh();
+    currentMessage = null;
+    const res = await post(path, { chat_id: CHAT, msg_id: MSG, ...enough[path] });
+    assert.strictEqual(res.code, 404, path);
+    assert.strictEqual(res.body.error, "no such message", path);
+    assert.deepStrictEqual(calls, [], path);
+  }
+});
+
+test("a reaction is passed through, and an empty one takes it off", async () => {
+  fresh();
+  let res = await post("/react", { chat_id: CHAT, msg_id: MSG, emoji: "\u{1F44D}" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "reacted" }]);
+  assert.deepStrictEqual(calls, [["react", "\u{1F44D}"]]);
+
+  fresh();
+  res = await post("/react", { chat_id: CHAT, msg_id: MSG, emoji: "" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "removed" }]);
+  assert.deepStrictEqual(calls, [["react", ""]]);
+});
+
+test("a reaction that is not an emoji never reaches the lookup", async () => {
+  // Refused on the way in, before the message is fetched: the emoji is handed
+  // to the browser page, and the order of the checks is what keeps an
+  // arbitrary string out of it.
+  fresh();
+  currentMessage = null;   // a lookup would 404 if one happened
+  const res = await post("/react", { chat_id: CHAT, msg_id: MSG, emoji: "<script>" });
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "bad emoji" }]);
+});
+
+test("a missing emoji is not read as an empty one", async () => {
+  // "" means take my reaction off. A caller who forgot the field must not
+  // have that done on their behalf.
+  fresh();
+  const res = await post("/react", { chat_id: CHAT, msg_id: MSG });
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "emoji is required" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a forward names a destination, and the destination has to exist", async () => {
+  fresh();
+  let res = await post("/forward", { chat_id: CHAT, msg_id: MSG });
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "bad destination chat id" }]);
+
+  fresh();
+  res = await post("/forward", { chat_id: CHAT, msg_id: MSG, to_chat_id: "254799999999@c.us" });
+  assert.deepStrictEqual([res.code, res.body], [404, { error: "no such destination chat" }]);
+  assert.deepStrictEqual(calls, [], "nothing is forwarded into a chat that is not there");
+
+  fresh();
+  knownChats.add("120363000000000001@g.us");
+  res = await post("/forward", { chat_id: CHAT, msg_id: MSG,
+                                 to_chat_id: "120363000000000001@g.us" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "forwarded" }]);
+  assert.deepStrictEqual(calls, [["forward", "120363000000000001@g.us"]]);
+});
+
+test("keep and un-keep are both stated outright", async () => {
+  fresh();
+  let res = await post("/star", { chat_id: CHAT, msg_id: MSG });
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "starred must be true or false" }]);
+  assert.deepStrictEqual(calls, []);
+
+  fresh();
+  res = await post("/star", { chat_id: CHAT, msg_id: MSG, starred: "yes" });
+  assert.strictEqual(res.code, 400, "a string is not a flag");
+
+  fresh();
+  res = await post("/star", { chat_id: CHAT, msg_id: MSG, starred: true });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "starred" }]);
+  assert.deepStrictEqual(calls, [["star"]]);
+
+  fresh();
+  res = await post("/star", { chat_id: CHAT, msg_id: MSG, starred: false });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "unstarred" }]);
+  assert.deepStrictEqual(calls, [["unstar"]]);
+});
+
+test("a pin names one of WhatsApp's three lengths", async () => {
+  fresh();
+  let res = await post("/pin-message", { chat_id: CHAT, msg_id: MSG, pinned: true });
+  assert.deepStrictEqual([res.code, res.body],
+                         [400, { error: "duration must be one of 24h, 7d, 30d" }]);
+
+  fresh();
+  res = await post("/pin-message", { chat_id: CHAT, msg_id: MSG, pinned: true, duration: "1h" });
+  assert.strictEqual(res.code, 400);
+  assert.deepStrictEqual(calls, []);
+
+  fresh();
+  res = await post("/pin-message", { chat_id: CHAT, msg_id: MSG, pinned: true, duration: "7d" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "pinned", seconds: 604800 }]);
+  assert.deepStrictEqual(calls, [["pin", 604800]]);
+
+  // Unpinning needs no length, and must not demand one.
+  fresh();
+  res = await post("/pin-message", { chat_id: CHAT, msg_id: MSG, pinned: false });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "unpinned", seconds: 0 }]);
+  assert.deepStrictEqual(calls, [["unpin"]]);
+});
+
+test("a pin WhatsApp will not take is the caller's answer, not a 500", async () => {
+  // Message.pin returns false when the page could not find the message or
+  // WhatsApp refused it — a chat caps how many messages can be pinned at
+  // once. It is the one action in this menu that reports on itself.
+  fresh();
+  pinAnswer = false;
+  const res = await post("/pin-message", { chat_id: CHAT, msg_id: MSG,
+                                           pinned: true, duration: "24h" });
+  assert.deepStrictEqual([res.code, res.body],
+                         [409, { error: "WhatsApp would not pin this message" }]);
+});
+
+test("a delete says which kind it is, and never defaults to for-everyone", async () => {
+  for (const body of [{}, { scope: "" }, { scope: "all" }, { scope: true },
+                      { everyone: true }]) {
+    fresh({ fromMe: true });
+    const res = await post("/delete-message", { chat_id: CHAT, msg_id: MSG, ...body });
+    assert.deepStrictEqual([res.code, res.body],
+                           [400, { error: 'scope must be "me" or "everyone"' }],
+                           JSON.stringify(body));
+    assert.deepStrictEqual(calls, [], JSON.stringify(body));
+  }
+});
+
+test("delete for me goes through whatever the message is", async () => {
+  fresh({ timestamp: Math.floor(Date.now() / 1000) - 400_000 });   // long past revoking
+  const res = await post("/delete-message", { chat_id: CHAT, msg_id: MSG, scope: "me" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "deleted for me" }]);
+  assert.deepStrictEqual(calls, [["delete", false]]);
+});
+
+test("delete for everyone goes through while WhatsApp still allows it", async () => {
+  fresh({ fromMe: true });
+  const res = await post("/delete-message", { chat_id: CHAT, msg_id: MSG, scope: "everyone" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "deleted for everyone" }]);
+  assert.deepStrictEqual(calls, [["delete", true]]);
+});
+
+test("delete for everyone is refused rather than quietly downgraded", async () => {
+  // This is the whole reason the check happens before the attempt: the
+  // library does not refuse a revoke it cannot perform. Past WhatsApp's
+  // limit, delete(true) deletes the message on this device only and resolves
+  // as though it had taken it back from everybody, so there is no failure
+  // afterwards to turn into an answer.
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cases = [
+    [{ fromMe: true, timestamp: nowSeconds - REVOKE_WINDOW_SECONDS - 60 },
+     "too late to delete this for everyone - WhatsApp allows that for"
+     + " two days and twelve hours after a message is sent"],
+    [{ fromMe: false },
+     "only the person who sent a message can delete it for everyone"],
+    [{ fromMe: true, type: "revoked" },
+     "this message has already been deleted"],
+  ];
+  for (const [over, error] of cases) {
+    fresh(over);
+    const res = await post("/delete-message", { chat_id: CHAT, msg_id: MSG, scope: "everyone" });
+    assert.deepStrictEqual([res.code, res.body], [409, { error }], JSON.stringify(over));
+    assert.deepStrictEqual(calls, [], "nothing may be deleted on the way to a refusal");
+  }
+});
+
+test("in a group, somebody else's recent message is still attempted", async () => {
+  // An admin can take it back and the message does not say whether the owner
+  // is one, so the attempt is theirs to make.
+  fresh({ id: { _serialized: "false_120363000000000001@g.us_3EB0AA11BB22",
+                remote: "120363000000000001@g.us" } });
+  const res = await post("/delete-message", { chat_id: "120363000000000001@g.us",
+                                              msg_id: "false_120363000000000001@g.us_3EB0AA11BB22",
+                                              scope: "everyone" });
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "deleted for everyone" }]);
+  assert.deepStrictEqual(calls, [["delete", true]]);
 });
