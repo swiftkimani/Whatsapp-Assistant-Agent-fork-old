@@ -481,6 +481,30 @@
            padding:var(--s2);border:1px solid var(--border);border-radius:var(--r-md);
            background:var(--surface)}
   .quoting .quote{flex:1;min-width:0;margin:0;background:transparent}
+
+  /* The long-press menu. Fixed rather than absolute, because it is placed
+     against the viewport and the pane it sits over scrolls underneath it. */
+  .msgmenu{position:fixed;z-index:60;min-width:200px;padding:var(--s1);
+           border:1px solid var(--border);border-radius:var(--r-md);
+           background:var(--surface);box-shadow:var(--e2)}
+  .reactbar{display:flex;gap:var(--s1);padding:var(--s1);margin-bottom:var(--s1);
+            border-bottom:1px solid var(--border)}
+  .reactbar button{width:36px;height:36px;display:grid;place-items:center;font-size:20px;
+                   line-height:1;border:0;border-radius:var(--r-pill);background:transparent}
+  .reactbar button:hover,.reactbar button:focus-visible{background:var(--surface-raised)}
+  .menuitems{display:flex;flex-direction:column}
+  .menuitems button{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:40px;
+                    padding:var(--s2) var(--s3);border:0;border-radius:var(--r-sm);
+                    background:transparent;color:var(--text);font-size:var(--f-sm);
+                    font-weight:500;text-align:start}
+  .menuitems button:hover:not(:disabled),.menuitems button:focus-visible{background:var(--surface-raised)}
+  .menuitems button:disabled{color:var(--text-muted);cursor:not-allowed}
+  .menuitems button.danger{color:var(--danger)}
+  .menuitems hr{width:100%;height:1px;margin:var(--s1) 0;border:0;background:var(--border)}
+  .menuitems svg{flex:none;opacity:.7}
+  /* Somebody reacted. The emoji themselves are another round trip per
+     message, so the thread says that it happened and not what was said. */
+  .reacted{font-size:var(--f-xs)}
   .listen{display:inline-block;margin-top:var(--s2);padding:var(--s1) var(--s3);font-size:var(--f-sm);font-weight:500;
           border-radius:var(--r-pill);color:var(--text);border:1px solid var(--border);background:var(--surface)}
   .listen:hover{background:var(--surface-raised)}
@@ -833,6 +857,28 @@
 
     <h3 class="sheet-group">This device</h3>
     <button id="lockBtn" class="signout" type="button">Sign out</button>
+  </div>
+</dialog>
+
+<!-- One menu, moved to whichever message was asked about. Built once because
+     a thread of fifty messages should not carry fifty hidden menus. -->
+<div id="msgMenu" class="msgmenu" role="menu" aria-label="What to do with this message" hidden>
+  <div id="msgReacts" class="reactbar" role="group" aria-label="React to this message"></div>
+  <div id="msgActions" class="menuitems"></div>
+</div>
+
+<dialog id="forwardTo" class="sheet" aria-labelledby="forwardTitle">
+  <div class="sheet-head">
+    <div class="sheet-id">
+      <h2 id="forwardTitle">Forward to</h2>
+      <p class="note">Pick a conversation. The message goes as a forward.</p>
+    </div>
+    <button id="forwardX" class="icon" type="button" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <input id="forwardFind" class="wa-search" type="search" autocomplete="off"
+           placeholder="Search conversations" aria-label="Search conversations to forward to">
+    <div id="forwardList" class="panel flat"></div>
   </div>
 </dialog>
 
@@ -1921,6 +1967,181 @@
   }
   $("quotingX").onclick = () => { stopQuoting(); $("waText").focus(); };
 
+
+  // ---- the long-press menu, the one WhatsApp opens on a message ----
+  // WhatsApp's own quick row. Kept short on purpose: the point of it is that
+  // the common reaction is one tap, not that every emoji is reachable.
+  const QUICK_REACTIONS = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F62E}", "\u{1F622}", "\u{1F64F}"];
+
+  const MENU_ICONS = {
+    reply: '<path d="M9 14L4 9l5-5"/><path d="M4 9h7a9 9 0 0 1 9 9v2"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+    forward: '<path d="M15 10l5-5-5-5" transform="translate(0,7)"/><path d="M20 12H9a5 5 0 0 0-5 5v2"/>',
+    pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3H7l3-3z"/>',
+    keep: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+    bin: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  };
+  const menuIcon = (name) => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MENU_ICONS[name]}</svg>`;
+
+  const msgMenu = $("msgMenu");
+  let menuFor = null;          // the message the open menu belongs to
+
+  function closeMenu(returnFocus) {
+    if (msgMenu.hidden) return;
+    msgMenu.hidden = true;
+    const opener = menuFor && menuFor.opener;
+    menuFor = null;
+    if (returnFocus && opener && opener.isConnected) opener.focus();
+  }
+
+  /** Keep the menu on screen. It is placed next to what was clicked, and a
+   *  message near the bottom of a long thread would otherwise open a menu
+   *  that runs off the edge. */
+  function placeMenu(x, y) {
+    msgMenu.hidden = false;
+    const box = msgMenu.getBoundingClientRect();
+    const pad = 8;
+    const left = Math.max(pad, Math.min(x, window.innerWidth - box.width - pad));
+    const top = Math.max(pad, Math.min(y, window.innerHeight - box.height - pad));
+    msgMenu.style.left = `${left}px`;
+    msgMenu.style.top = `${top}px`;
+  }
+
+  function menuButton(label, icon, onPick, { danger = false, disabled = false, why = "" } = {}) {
+    const b = btn("", danger ? "danger" : "");
+    b.setAttribute("role", "menuitem");
+    b.innerHTML = menuIcon(icon);
+    b.append(el("span", "", label));
+    b.disabled = disabled;
+    if (why) b.title = why;
+    if (!disabled) b.onclick = () => { closeMenu(false); onPick(); };
+    return b;
+  }
+
+  /** Run one of WhatsApp's own message actions and say what happened. The
+   *  bridge answers refusals in words meant to be read, so they are shown as
+   *  they arrive rather than translated into something vaguer. */
+  async function messageAction(path, body, done) {
+    try {
+      await api(path, body);
+      bubble("bot", done);
+      await loadWaThread(true);
+    } catch (err) {
+      bubble("bot", err.message, true);
+    }
+  }
+
+  function openMsgMenu(m, chatId, opener, x, y) {
+    menuFor = { message: m, opener };
+
+    const reacts = $("msgReacts");
+    reacts.replaceChildren(...QUICK_REACTIONS.map((emoji) => {
+      const b = btn(emoji, "");
+      b.setAttribute("aria-label", `React with ${emoji}`);
+      b.onclick = () => {
+        closeMenu(false);
+        messageAction("/api/wa/react", { chat_id: chatId, msg_id: m.id, emoji }, `Reacted ${emoji}.`);
+      };
+      return b;
+    }));
+    if (m.has_reaction) {
+      const clear = btn("\u2715", "");
+      clear.setAttribute("aria-label", "Remove my reaction");
+      clear.title = "Remove my reaction";
+      clear.onclick = () => {
+        closeMenu(false);
+        messageAction("/api/wa/react", { chat_id: chatId, msg_id: m.id, emoji: "" }, "Reaction removed.");
+      };
+      reacts.append(clear);
+    }
+
+    const items = [
+      menuButton("Reply", "reply", () => startQuoting(m)),
+      menuButton("Copy", "copy", async () => {
+        try {
+          await navigator.clipboard.writeText(m.body || m.kind || "");
+          bubble("bot", "Copied.");
+        } catch { bubble("bot", "This browser would not let me reach the clipboard.", true); }
+      }),
+      menuButton("Forward", "forward", () => askForwardTo(m, chatId)),
+      menuButton("Pin for 7 days", "pin", () => messageAction("/api/wa/pin",
+        { chat_id: chatId, msg_id: m.id, pinned: true, duration: "7d" }, "Pinned for 7 days.")),
+      menuButton("Unpin", "pin", () => messageAction("/api/wa/pin",
+        { chat_id: chatId, msg_id: m.id, pinned: false, duration: "24h" }, "Unpinned.")),
+      menuButton(m.starred ? "Remove from kept" : "Keep", "keep", () => messageAction("/api/wa/star",
+        { chat_id: chatId, msg_id: m.id, starred: !m.starred },
+        m.starred ? "Taken out of your kept messages." : "Kept.")),
+    ];
+    items.push(el("hr"));
+    items.push(menuButton("Delete for me", "bin", () => messageAction("/api/wa/delete",
+      { chat_id: chatId, msg_id: m.id, scope: "me" }, "Deleted from this device."), { danger: true }));
+    items.push(menuButton("Delete for everyone", "bin", () => {
+      // Irreversible, and the other person watches it go.
+      if (!confirm("Delete this for everyone? They will see that a message was deleted.")) return;
+      messageAction("/api/wa/delete", { chat_id: chatId, msg_id: m.id, scope: "everyone" },
+        "Deleted for everyone.");
+    }, {
+      danger: true,
+      disabled: !m.can_delete_for_everyone,
+      why: m.can_delete_for_everyone ? ""
+        : "WhatsApp only allows this for a while after a message is sent, and only for your own messages.",
+    }));
+    $("msgActions").replaceChildren(...items);
+
+    placeMenu(x, y);
+    const first = msgMenu.querySelector("button:not(:disabled)");
+    if (first) first.focus();
+  }
+
+  // Closing: anywhere else, Escape, or the thread scrolling out from under it.
+  document.addEventListener("pointerdown", (e) => {
+    if (!msgMenu.hidden && !msgMenu.contains(e.target)) closeMenu(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenu(true);
+  });
+  $("waPanel").addEventListener("scroll", () => closeMenu(false), { passive: true });
+
+  // ---- forwarding: pick where it goes ----
+  const forwardDialog = $("forwardTo");
+  let forwarding = null;
+
+  function askForwardTo(m, chatId) {
+    forwarding = { message: m, from: chatId };
+    $("forwardFind").value = "";
+    paintForwardList();
+    forwardDialog.showModal();
+    $("forwardFind").focus();
+  }
+
+  function paintForwardList() {
+    const term = $("forwardFind").value.trim().toLowerCase();
+    const choices = waChats
+      .filter((c) => !c.left && c.id !== (forwarding && forwarding.from))
+      .filter((c) => !term || (c.name || "").toLowerCase().includes(term))
+      .slice(0, 60);
+    $("forwardList").replaceChildren(...(choices.length ? choices.map((c) => {
+      const row = el("div", "wa-row");
+      const open = btn("", "wa-openrow");
+      const main = el("div", "wa-main");
+      main.append(el("span", "wa-name", c.name + groupSuffix(c)));
+      open.append(avatar(c.name, c.id), main);
+      open.setAttribute("aria-label", `Forward to ${c.name}`);
+      open.onclick = () => {
+        const to = c.id, name = c.name;
+        forwardDialog.close();
+        messageAction("/api/wa/forward",
+          { chat_id: forwarding.from, msg_id: forwarding.message.id, to_chat_id: to },
+          `Forwarded to ${name}.`);
+      };
+      row.append(open);
+      return row;
+    }) : [note(term ? "Nothing matches that." : "No other conversations to forward to.")]));
+  }
+  $("forwardFind").oninput = paintForwardList;
+  $("forwardX").onclick = () => forwardDialog.close();
+  forwardDialog.onclick = (e) => { if (e.target === forwardDialog) forwardDialog.close(); };
+
   function waBubble(m, chatId) {
     const bubble = el("div", `msg ${m.from_me ? "me" : "bot"}`);
     // The quote comes first, as it does in WhatsApp: it is the context for
@@ -1978,12 +2199,22 @@
     // typed on the phone unless it is said here.
     if (SENT_BY[m.sent_by]) foot.append(el("span", "by-ai", SENT_BY[m.sent_by]));
     foot.append(stamp);
-    const pick = btn("", "quote-btn");
-    pick.innerHTML = QUOTE_ICON;
-    pick.title = "Reply to this message";
-    pick.setAttribute("aria-label", "Reply to this message, quoting it");
-    pick.onclick = () => startQuoting(m);
-    foot.append(pick);
+    if (m.has_reaction) foot.append(el("span", "reacted", "\u{1F642} reacted"));
+    const more = btn("", "quote-btn");
+    more.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>';
+    more.title = "What to do with this message";
+    more.setAttribute("aria-label", "What to do with this message");
+    more.setAttribute("aria-haspopup", "menu");
+    more.onclick = (event) => {
+      const box = event.currentTarget.getBoundingClientRect();
+      openMsgMenu(m, chatId, event.currentTarget, box.left, box.bottom + 4);
+    };
+    foot.append(more);
+    // Right-click the bubble itself, which is what a desktop reaches for.
+    bubble.oncontextmenu = (event) => {
+      event.preventDefault();
+      openMsgMenu(m, chatId, more, event.clientX, event.clientY);
+    };
     bubble.append(foot);
     return bubble;
   }

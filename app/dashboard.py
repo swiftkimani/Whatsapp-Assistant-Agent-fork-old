@@ -707,6 +707,94 @@ async def wa_stream(request: Request):
     })
 
 
+# ---- the actions on one message: WhatsApp's own long-press menu ----
+# Reply is /api/wa/reply above; Copy never leaves the browser; Report is a
+# moderation action this will not automate.
+
+
+class MessageAction(BaseModel):
+    chat_id: str = Field(pattern=ANY_CHAT_ID)
+    msg_id: str = Field(pattern=MESSAGE_ID)
+
+
+class ReactRequest(MessageAction):
+    # "" is how the library removes a reaction, so it is a real value here and
+    # not a missing one. The bridge checks it is a single emoji; the bound
+    # here only keeps an unreasonable string off the wire.
+    emoji: str = Field(default="", max_length=64)
+
+
+class ForwardRequest(MessageAction):
+    to_chat_id: str = Field(pattern=ANY_CHAT_ID)
+
+
+class StarRequest(MessageAction):
+    starred: bool
+
+
+class PinRequest(MessageAction):
+    pinned: bool
+    duration: Literal["24h", "7d", "30d"] = "24h"
+
+
+class DeleteRequest(MessageAction):
+    # No default on purpose. Deleting for everyone is visible to the other
+    # person and cannot be undone, so it is never what a caller gets by
+    # forgetting to say.
+    scope: Literal["me", "everyone"]
+
+
+async def _message_action(path: str, payload: dict) -> dict:
+    """Pass one of WhatsApp's own message actions through to the bridge.
+
+    The bridge answers 400/404/409 with a sentence meant to be read — "too
+    late to delete this for everyone", "WhatsApp would not pin this message" —
+    so those come back as they are rather than being flattened into a 502. A
+    person deciding what to do next needs WhatsApp's reason, not ours.
+    """
+    r = await _bridge_post(path, payload, timeout=30)
+    if r.status_code == 200:
+        return r.json()
+    reason = ""
+    if r.headers.get("content-type", "").startswith("application/json"):
+        reason = ((r.json() or {}).get("error") or "")
+    if r.status_code in (400, 404, 409) and reason:
+        raise HTTPException(r.status_code, reason)
+    raise HTTPException(502, f"The bridge could not do that ({r.status_code}): {r.text[:120]}")
+
+
+@router.post("/api/wa/react", dependencies=[Depends(require_auth)])
+async def wa_react(body: ReactRequest):
+    return await _message_action("/react", body.model_dump())
+
+
+@router.post("/api/wa/forward", dependencies=[Depends(require_auth)])
+async def wa_forward(body: ForwardRequest):
+    return await _message_action("/forward", body.model_dump())
+
+
+@router.post("/api/wa/star", dependencies=[Depends(require_auth)])
+async def wa_star(body: StarRequest):
+    return await _message_action("/star", body.model_dump())
+
+
+@router.post("/api/wa/pin", dependencies=[Depends(require_auth)])
+async def wa_pin(body: PinRequest):
+    return await _message_action("/pin-message", body.model_dump())
+
+
+@router.post("/api/wa/delete", dependencies=[Depends(require_auth)])
+async def wa_delete(body: DeleteRequest):
+    """Deleting for everyone is irreversible and the other person sees it go.
+
+    The bridge refuses it up front when WhatsApp would not actually honour it,
+    because the library quietly downgrades to a delete-for-me in that case and
+    reports success either way — which would tell the owner a message was
+    withdrawn when it is still sitting on somebody's phone.
+    """
+    return await _message_action("/delete-message", body.model_dump())
+
+
 @router.post("/api/wa/reply", dependencies=[Depends(require_auth)])
 async def wa_reply(body: ReplyRequest):
     """Send a message as yourself, into a conversation that already exists.
