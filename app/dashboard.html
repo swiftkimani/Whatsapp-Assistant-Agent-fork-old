@@ -84,15 +84,31 @@
   .top #lockBtn{align-self:center}
 
   /* tabs */
-  .tabs{display:flex;gap:var(--s1);padding:var(--s1);background:var(--surface);border:1px solid var(--border);
-        border-radius:var(--r-md);overflow-x:auto}
-  .tabs button{flex:1;display:flex;gap:var(--s2);align-items:center;justify-content:center;white-space:nowrap;
-               padding:var(--s2) var(--s3);border:0;border-radius:var(--r-sm);background:transparent;
-               color:var(--text-muted);font-weight:500;transition:background var(--d-fast) var(--ease)}
+  /* A vertical rail, the way WhatsApp Web does it. Navigation costs
+     horizontal space — of which there is plenty — instead of the vertical
+     room the conversation actually needs. Measured against web.whatsapp.com:
+     a 65px rail, a 414px list, the rest for the thread. */
+  #shell{flex:1;min-height:0;display:flex;gap:var(--s2)}
+  .tabs{display:flex;flex-direction:column;gap:var(--s1);padding:var(--s1);flex:0 0 64px;
+        background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md)}
+  .tabs .lbl{font-size:9px;line-height:1.1;text-align:center}
+  .tabs button{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;
+               padding:var(--s2) 0;border:0;border-radius:var(--r-sm);background:transparent;
+               color:var(--text-muted);font-weight:500;transition:background var(--d-fast) var(--ease);
+               position:relative}
   .tabs button:hover{background:var(--surface-raised)}
   .tabs button[aria-selected="true"]{color:var(--primary-fg);background:var(--primary)}
   .badge{padding:0 var(--s1);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--f-xs);font-weight:600}
-  @media (max-width:560px){.tabs .lbl{display:none}.tabs [aria-selected="true"] .lbl{display:inline}}
+  .tabs .badge{position:absolute;top:2px;right:8px}
+  @media (max-width:900px){
+    /* Back to a strip along the bottom on a phone, where height is scarcer
+       still and a side rail would eat the thread's width. */
+    #shell{flex-direction:column-reverse}
+    .tabs{flex-direction:row;flex:0 0 auto}
+    .tabs button{flex:1}
+    .tabs .lbl{display:none}
+    .tabs [aria-selected="true"] .lbl{display:inline;font-size:var(--f-xs)}
+  }
 
   /* views */
   .view{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s3)}
@@ -163,12 +179,22 @@
      the one control on screen that belongs to exactly one pane. */
   #view-whatsapp{display:flex;flex-direction:column;min-height:0}
   .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
-  #waReply{margin-inline-start:calc(clamp(300px,30%,400px) + var(--s3))}
+  #waReply{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
   @media (max-width:900px){ #waReply{margin-inline-start:0} }
   .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
   /* The list leads, as it does in WhatsApp itself, and gets room for a real
      conversation name rather than three truncated words. */
-  .wa-list-col{flex:0 0 clamp(300px,30%,400px)}
+  /* Width is a variable so the drag handle can move it and the reply bar can
+     line up with the conversation without being told twice. */
+  :root{--wa-list-w:400px}
+  .wa-list-col{flex:0 0 var(--wa-list-w)}
+  .wa-grip{flex:0 0 7px;cursor:col-resize;border-radius:var(--r-pill);
+           background:transparent;transition:background var(--d-fast) var(--ease)}
+  .wa-grip:hover,.wa-grip:focus-visible,.wa-grip.dragging{background:var(--primary)}
+  /* While dragging, nothing else should take the pointer or select text. */
+  body.resizing{cursor:col-resize;user-select:none}
+  body.resizing iframe,body.resizing .panel{pointer-events:none}
+  @media (max-width:900px){ .wa-grip{display:none} }
   /* The list is right there, so there is nothing to go back to. The button is
      only meaningful once the columns stack. */
   @media (min-width:901px){ #waBack{display:none} }
@@ -399,6 +425,7 @@
     <button id="lockBtn" class="chip plain" type="button">Sign out</button>
   </header>
 
+  <div id="shell">
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button id="tab-whatsapp" data-tab="whatsapp" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg><span class="lbl">WhatsApp</span><span id="waUnread" class="badge" hidden></span></button>
     <button id="tab-held" data-tab="held" role="tab" aria-selected="false"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="lbl">Held</span><span id="heldCount" class="badge" hidden></span></button>
@@ -421,6 +448,9 @@
         <div id="waFilters" class="wa-filters" role="group" aria-label="Filter conversations"></div>
         <div id="waList" class="panel"></div>
       </div>
+      <div id="waGrip" class="wa-grip" role="separator" aria-orientation="vertical"
+           tabindex="0" aria-label="Drag to resize the chat list"
+           title="Drag to resize — double-click to reset"></div>
       <div class="wa-col wa-thread-col">
         <div class="filters">
           <button id="waBack" class="ghost" type="button" hidden>&larr; Chats</button>
@@ -526,6 +556,7 @@
     <p id="addNote" class="note" role="status" aria-live="polite" dir="auto"></p>
     <div id="peopleList" class="panel"></div>
   </section>
+  </div>
   <audio id="voice" hidden></audio>
 </main>
 
@@ -1812,6 +1843,56 @@
     $("waPanel").replaceChildren(note("Pick a conversation on the left to read it here."));
     markOpenRow("");
   };
+  // Drag the divider to give either side more room. Kept per browser, because
+  // how much list you want is a matter of what you are doing right now.
+  const LIST_MIN = 240, LIST_MAX = 680, LIST_DEFAULT = 400;
+  function setListWidth(px, remember) {
+    const w = Math.round(Math.min(LIST_MAX, Math.max(LIST_MIN, px)));
+    document.documentElement.style.setProperty("--wa-list-w", `${w}px`);
+    $("waGrip").setAttribute("aria-valuenow", String(w));
+    if (remember) { try { localStorage.setItem("listWidth", String(w)); } catch { /* private mode */ } }
+  }
+  try {
+    const saved = Number(localStorage.getItem("listWidth"));
+    if (saved) setListWidth(saved, false);
+  } catch { /* private mode */ }
+
+  (() => {
+    const grip = $("waGrip");
+    let dragging = false;
+    const move = (e) => {
+      if (!dragging) return;
+      const left = document.querySelector(".wa-list-col").getBoundingClientRect().left;
+      setListWidth(e.clientX - left, false);
+    };
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      grip.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      setListWidth(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--wa-list-w")), true);
+    };
+    grip.addEventListener("pointerdown", (e) => {
+      dragging = true;
+      grip.classList.add("dragging");
+      document.body.classList.add("resizing");
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", stop);
+    grip.addEventListener("pointercancel", stop);
+    grip.addEventListener("dblclick", () => setListWidth(LIST_DEFAULT, true));
+    // Keyboard, because a divider you can only drag is one some people cannot move.
+    grip.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 48 : 16;
+      const now = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--wa-list-w"));
+      if (e.key === "ArrowLeft") { setListWidth(now - step, true); e.preventDefault(); }
+      if (e.key === "ArrowRight") { setListWidth(now + step, true); e.preventDefault(); }
+      if (e.key === "Home") { setListWidth(LIST_DEFAULT, true); e.preventDefault(); }
+    });
+  })();
+
   $("waRefresh").onclick = () => loadWa();
   // Filtering is local, so it costs nothing and needs no debounce.
   $("waSearch").oninput = () => { if (waChats.length) paintWaList(); };

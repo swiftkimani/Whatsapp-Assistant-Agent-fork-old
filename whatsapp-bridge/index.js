@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { checkAllowed } = require("./allowlist");
+const { SendQueue } = require("./send_queue");
 const { readContacts } = require("./bridge_api");
 const { startBridgeApi } = require("./bridge_api");
 
@@ -163,6 +164,27 @@ let pairingBlockedUntil = 0;
 // — the terminal art in these logs rotates every twenty seconds and cannot be
 // scanned off a log viewer — so the dashboard shows it instead.
 const link = { linked: false, qr: null, code: null, error: null, stage: "starting" };
+
+// How fast this account is allowed to talk. Every automatic send waits its
+// turn here: WhatsApp bans accounts for automated messaging, and replies that
+// land in the same few hundred milliseconds, dozens at once, at any hour, are
+// what that looks like from the outside.
+const sendQueue = new SendQueue();
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** Space out one automatic send. Returns false when a ceiling says not now. */
+async function paced(textLength, what) {
+  const capped = sendQueue.overCap();
+  if (capped) {
+    console.log(`[send] held back: ${what} would pass the per-${capped} ceiling`);
+    return false;
+  }
+  const wait = sendQueue.delayFor(textLength);
+  console.log(`[send] ${what} in ${Math.round(wait / 1000)}s`);
+  await pause(wait);
+  sendQueue.record();
+  return true;
+}
 
 function announcePairingCode(code) {
   // Kept for the dashboard as well as the log: a code printed only here is a
@@ -373,11 +395,16 @@ client.on("message", async (msg) => {
       }
 
       if (data.action === "send") {
-        if (data.reply_audio_base64) {
+        const text = data.reply_text || "";
+        if (!(await paced(text.length, "auto-reply"))) {
+          // Over a ceiling. Saying nothing is the right failure here: the
+          // draft is already in the owner's held queue either way.
+          console.log(`Held back for ${anon(msg.from)} — check your dashboard.`);
+        } else if (data.reply_audio_base64) {
           const voiceMedia = new MessageMedia("audio/ogg", data.reply_audio_base64);
           await client.sendMessage(msg.from, voiceMedia, { sendAudioAsVoice: true });
-        } else if (data.reply_text) {
-          await client.sendMessage(msg.from, data.reply_text);
+        } else if (text) {
+          await client.sendMessage(msg.from, text);
         }
       } else if (data.action === "hold") {
         console.log(`Held for approval for ${anon(msg.from)} — check your dashboard.`);
