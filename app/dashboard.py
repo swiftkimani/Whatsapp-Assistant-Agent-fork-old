@@ -423,6 +423,35 @@ def write_note(body: NoteRequest):
     return {"status": "saved", "chars": len(text)}
 
 
+def _assistant_states(chats: list[dict]) -> None:
+    """Annotate a whole list of chats in one pass, in place.
+
+    The single-chat helper below reads contacts.json and opens two or three
+    SQLite connections every time it is called. Once per chat that is 1,100
+    connections and 400 file reads for a 400-row list, around a quarter of a
+    second of blocked event loop — and this runs inside an async handler, so
+    the live stream and every other request wait behind it.
+
+    Same answers, read once.
+    """
+    book = contacts_store.load()
+    modes = db.all_modes()
+    fallback = db.default_mode()
+    for chat in chats:
+        chat_id = chat.get("id", "")
+        name = contacts_store.name_for(chat_id, book=book)
+        key = name.strip().lower() if name else ""
+        mode = modes.get(key, fallback) if name else fallback
+        is_group = bool(chat.get("is_group"))
+        chat["assistant"] = {
+            "name": name,
+            "mode": mode,
+            "auto": mode == "auto" and not is_group,
+            "chosen": bool(name) and key in modes,
+            "can_choose": not is_group,
+        }
+
+
 def _assistant_state(chat_id: str, is_group: bool = False) -> dict:
     """What the assistant will do with this conversation, for the pane to show.
 
@@ -476,8 +505,7 @@ async def wa_link():
 async def wa_chats(limit: int = Query(25, ge=1, le=100)):
     """Recent conversations, most recently active first."""
     data = await _bridge_read("/chats", {"limit": limit}, timeout=60)
-    for chat in data.get("chats", []):
-        chat["assistant"] = _assistant_state(chat["id"], chat.get("is_group", False))
+    _assistant_states(data.get("chats", []))
     data["default_mode"] = db.default_mode()
     return data
 

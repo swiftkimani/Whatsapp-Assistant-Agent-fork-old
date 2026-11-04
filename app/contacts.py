@@ -57,10 +57,14 @@ def _same_number(a: str, b: str) -> bool:
     return len(national) >= 7 and len(longer) > len(national) and longer.endswith(national)
 
 
-def name_for(chat_id: str, number: str | None = None) -> str | None:
-    """Reverse lookup: which contacts.json name does this chat belong to?"""
+def name_for(chat_id: str, number: str | None = None, book: dict[str, str] | None = None) -> str | None:
+    """Reverse lookup: which contacts.json name does this chat belong to?
+
+    `book` lets a caller resolving many chats at once read the file a single
+    time instead of once per chat.
+    """
     base = chat_id.split("@")[0]
-    for name, value in load().items():
+    for name, value in (load() if book is None else book).items():
         value = value.strip()
         if "@" in value:
             if value == chat_id or value.split("@")[0] == base:

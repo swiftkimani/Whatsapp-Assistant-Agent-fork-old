@@ -43,10 +43,23 @@ function mediaLabel(type) {
   }[type] || "Attachment";
 }
 
+/** One line, for a preview. */
 const clip = (s, max) => {
   const text = String(s || "").replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 };
+
+/** The message itself, with its line breaks. A preview has to be one line;
+ *  the body does not, and collapsing it turned every multi-line message into
+ *  a single run-on line even though the page already renders pre-wrap. */
+const clipBody = (s, max) => {
+  const text = String(s || "").replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};
+
+// Types that carry no downloadable file, so hasMedia is false and they used to
+// arrive with no label at all — an empty bubble reading "(no text)".
+const UNDOWNLOADABLE = new Set(["location", "vcard", "multi_vcard", "revoked", "poll_creation", "album"]);
 
 /** Fall back to the number when WhatsApp has no name for the chat. */
 function chatName(chat, id) {
@@ -77,16 +90,18 @@ function shapeChats(chats, { limit = DEFAULT_CHATS, blocked = new Set() } = {}) 
         is_group: Boolean(chat.isGroup),
         unread: Number(chat.unreadCount) || 0,
         ts: Number(last ? last.timestamp : chat.timestamp) || 0,
-        preview: body || (last && last.hasMedia ? mediaLabel(last.type) : ""),
+        preview: body || (last && (last.hasMedia || UNDOWNLOADABLE.has(last.type))
+          ? mediaLabel(last.type) : ""),
         from_me: Boolean(last && last.fromMe),
         // Archived chats are still chats. They are reported so the dashboard
         // can set them aside rather than silently dropping them, which is how
         // a conversation goes missing with nothing to explain it.
         archived: Boolean(chat.archived),
+        pinned: Boolean(chat.pinned),
       };
     })
-    // Most recently active first, which is the order WhatsApp itself shows.
-    .sort((a, b) => b.ts - a.ts)
+    // Pinned first, then most recently active — the order the phone shows.
+    .sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || (b.ts - a.ts))
     .slice(0, Math.max(1, limit));
 }
 
@@ -99,8 +114,11 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES } = {}) {
       from_me: Boolean(msg.fromMe),
       // In a group, who in the group said it.
       author: String(msg.author || "").split("@")[0].split(":")[0] || "",
-      body: clip(msg.body, BODY_CHARS),
-      kind: msg.hasMedia ? mediaLabel(msg.type) : "",
+      // A contact card's "body" is the raw vCard — BEGIN:VCARD VERSION:3.0 …
+      // — which was being rendered as the message text.
+      body: UNDOWNLOADABLE.has(msg.type) && msg.type !== "poll_creation"
+        ? "" : clipBody(msg.body, BODY_CHARS),
+      kind: (msg.hasMedia || UNDOWNLOADABLE.has(msg.type)) ? mediaLabel(msg.type) : "",
       has_media: Boolean(msg.hasMedia),
       // The raw type decides the element; the label above is the words.
       media_type: msg.hasMedia ? String(msg.type || "") : "",
@@ -110,6 +128,10 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES } = {}) {
       // fetched with the thread — the dashboard asks for it only when the
       // owner says so.
       view_once: Boolean(msg.isViewOnce),
+      // WhatsApp sends a GIF as a video; played with controls it looks like a
+      // still that has to be clicked.
+      is_gif: Boolean(msg.isGif),
+      forwarded: Boolean(msg.isForwarded),
     }))
     .sort((a, b) => a.ts - b.ts)   // oldest first: a thread reads downwards
     .slice(-Math.max(1, limit));

@@ -171,7 +171,18 @@ macOS/ARM → Linux/x86 and worked; the profile is ~345 MB because the WhatsApp
 IndexedDB carries message history, not just keys.
 
 **If the link is ever lost**, that is the procedure: link on a laptop, copy
-`.wwebjs_auth/session` into the volume, `chown -R 10001:10001`, restart. A
+**`whatsapp-bridge/.wwebjs_auth/session`** into the volume, `chown -R
+10001:10001`, restart.
+
+Note the path. There are two profiles on a development laptop, because
+LocalAuth used to resolve its directory against the working directory:
+`scripts/dev.sh` runs the bridge from `whatsapp-bridge/`, so that is the
+linked one (~415 MB, WhatsApp IndexedDB ~235 MB, `last-wid-md` present in
+Local Storage), while running `node whatsapp-bridge/index.js` from the repo
+root makes an unlinked one at the root (~105 MB, IndexedDB ~300 KB, no
+`last-wid-md`). Transplanting the root copy puts a profile in the volume that
+has never been paired — which looks exactly like the session being lost. The
+path is pinned to `__dirname` now, so new installs only ever make one. A
 pre-transplant copy is kept on the server as `session.replaced`.
 
 Also fixed here: the bridge was logging senders' phone numbers and message text
@@ -356,8 +367,9 @@ procedure under *Done — linking*.
 
 **The laptop's session is still valid.** Starting the bridge here came up with
 `WhatsApp bridge is ready ... linked=a8ad873f` and immediately received live
-messages. Nothing needs re-linking: the working credential exists, it is just
-on the wrong machine (`.wwebjs_auth/session`, ~105 MB).
+messages. The working credential is at **`whatsapp-bridge/.wwebjs_auth/session`**
+(~415 MB). An earlier note here named the repo-root copy, which is a different
+profile that was never paired — see *Done — linking* for how to tell them apart.
 
 **The stale version pin was real but was not the whole cause.** It is fixed and
 deployed — the bridge now logs `2.3000.1052866173-alpha` — and
@@ -383,6 +395,26 @@ The transplant needs host access: the Coolify terminal, ssh and packaging the
 session are all outside what the agent may do, and compose volume mounts are
 read-only in Coolify's storage panel. It is the owner's to run; the commands
 are in the session notes and follow *Done — linking*.
+
+## Why a logout was unrecoverable (2026-11-04)
+The session did not expire on its own. `whatsapp-web.js` deletes the whole
+profile when WhatsApp reports the device logged out — `Client.js`'s frame
+handler calls `authStrategy.logout()`, and `LocalAuth.logout()` is
+`fs.rm(userDataDir, { recursive: true, force: true })`. The bridge log has the
+trigger in it: `WhatsApp disconnected: LOGOUT`.
+
+On a laptop that costs a rescan. Here it costs the account, because the
+passkey gate means the container cannot link itself and that directory is the
+only copy of a credential made elsewhere. `KeepProfileLocalAuth` renames it to
+`session.loggedout-<timestamp>` instead, so a logout is still a logout but
+nothing is destroyed.
+
+The likely trigger is recorded above: running the bridge in two places. The
+laptop profile was last written 2026-11-03 19:35, after the transplant.
+
+`dataPath` is also pinned to `__dirname` now. LocalAuth resolved it against
+the working directory, which is what created two profiles on the laptop and
+made it possible to transplant the wrong one.
 
 ## The dashboard rebuilt (2026-11-03)
 Live on the server as deployment `98ce06d`. Verified there rather than only

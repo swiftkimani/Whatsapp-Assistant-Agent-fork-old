@@ -21,7 +21,7 @@ const message = (over = {}) => ({
 test("a chat is reduced to what the dashboard shows", () => {
   assert.deepStrictEqual(shapeChats([chat({ unreadCount: 3 })]), [{
     id: "254712345678@c.us", name: "Jane", is_group: false,
-    unread: 3, ts: 1200, preview: "niaje", from_me: false, archived: false,
+    unread: 3, ts: 1200, preview: "niaje", from_me: false, archived: false, pinned: false,
   }]);
 });
 
@@ -195,4 +195,52 @@ test("an archived chat is reported as archived rather than dropped", () => {
 test("an ordinary chat is not marked archived", () => {
   const [c] = shapeChats([chat({ id: { _serialized: "254712345678@c.us" } })]);
   assert.strictEqual(c.archived, false);
+});
+
+// ---- what the phone shows, and what used to come through blank ----
+
+test("a contact card is labelled, not dumped as raw vCard text", () => {
+  // Message.body for a CONTACT_CARD *is* the vCard, and it was rendering as
+  // the message: BEGIN:VCARD VERSION:3.0 FN:… across the bubble.
+  const [m] = shapeMessages([{ id: { _serialized: "a" }, timestamp: 1, type: "vcard",
+                               body: "BEGIN:VCARD\nVERSION:3.0\nFN:Jane" }]);
+  assert.strictEqual(m.kind, "Contact card");
+  assert.strictEqual(m.body, "", "the vCard syntax must not be shown as text");
+});
+
+test("types that carry no file are still labelled", () => {
+  // These have no directPath, so hasMedia is false and they arrived with no
+  // label at all — an empty bubble reading "(no text)".
+  for (const [type, label] of [["location", "Location"], ["revoked", "Deleted message"],
+                               ["multi_vcard", "Attachment"]]) {
+    const [m] = shapeMessages([{ id: { _serialized: "a" }, timestamp: 1, type }]);
+    assert.strictEqual(m.kind, label, type);
+  }
+});
+
+test("a poll keeps its question as well as its label", () => {
+  const [m] = shapeMessages([{ id: { _serialized: "a" }, timestamp: 1,
+                               type: "poll_creation", body: "Lunch at one?" }]);
+  assert.strictEqual(m.kind, "Poll");
+  assert.strictEqual(m.body, "Lunch at one?");
+});
+
+test("a message keeps its line breaks", () => {
+  // The page renders pre-wrap; collapsing whitespace here made every
+  // multi-line message one run-on line before it ever got there.
+  const [m] = shapeMessages([{ id: { _serialized: "a" }, timestamp: 1, body: "one\ntwo\nthree" }]);
+  assert.strictEqual(m.body, "one\ntwo\nthree");
+});
+
+test("a preview is still a single line", () => {
+  const [c] = shapeChats([chat({ lastMessage: { body: "one\ntwo", timestamp: 2 } })]);
+  assert.strictEqual(c.preview, "one two");
+});
+
+test("pinned chats sort above more recent ones", () => {
+  const mk = (id, name, extra) => chat({ id: { _serialized: id }, name, ...extra });
+  // Chat exposes `pinned`; `pin` is the raw field it is built from.
+  const out = shapeChats([mk("1@c.us", "recent", { timestamp: 9 }),
+                          mk("2@c.us", "pinned", { pinned: true, timestamp: 1 })]);
+  assert.deepStrictEqual(out.map((c) => c.name), ["pinned", "recent"]);
 });

@@ -101,8 +101,37 @@ if (process.env.PUPPETEER_EXECUTABLE_PATH) {
 // ("Could not request a pairing code"), then a QR that nothing would accept.
 const WA_WEB_VERSION = process.env.WA_WEB_VERSION || "2.3000.1052866173-alpha";
 
+// whatsapp-web.js deletes the entire profile when WhatsApp reports this device
+// logged out: Client.js's frame handler calls authStrategy.logout(), and
+// LocalAuth.logout() is fs.rm(userDataDir, { recursive: true, force: true }).
+//
+// On a laptop that costs a rescan. Here it costs the account. The passkey gate
+// means this container cannot link itself, so that directory is the only copy
+// of a credential that has to be created on another machine and carried in —
+// and one logout deletes it with nothing to recover from. Park it instead; the
+// library recreates the directory on the next two calls it makes.
+class KeepProfileLocalAuth extends LocalAuth {
+  async logout() {
+    if (!this.userDataDir) return;
+    const parked = `${this.userDataDir}.loggedout-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    try {
+      await fs.promises.rename(this.userDataDir, parked);
+      console.error(`WhatsApp logged this device out. The profile was kept at ${parked} ` +
+                    `rather than deleted. It is no longer a working session — re-linking ` +
+                    `needs a machine with a real browser — but nothing was destroyed.`);
+    } catch (err) {
+      console.error("Could not park the logged-out profile:", err.message);
+    }
+  }
+}
+
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  // The path is pinned to this file rather than left to resolve against the
+  // working directory. That default is what produced two profiles on the
+  // development laptop — one linked, one not — and sent a transplant to the
+  // wrong one. It also makes this agree with clearStaleChromiumLocks() by
+  // construction instead of by coincidence.
+  authStrategy: new KeepProfileLocalAuth({ dataPath: path.join(__dirname, ".wwebjs_auth") }),
   puppeteer: puppeteerConfig,
   webVersion: WA_WEB_VERSION,
   webVersionCache: {
