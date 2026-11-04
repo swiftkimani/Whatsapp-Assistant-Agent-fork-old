@@ -206,3 +206,18 @@ def test_a_group_cannot_be_chosen_because_it_is_never_answered(signed_in, bridge
 def test_choosing_needs_a_session(client, bridge):
     r = client.post("/api/wa/assistant", json={"chat_id": "254799000111@c.us", "enabled": True})
     assert r.status_code == 401
+
+
+def test_a_classic_group_can_report_that_it_moved(client):
+    """The pane learns a conversation changed from this ping. It rejected
+    classic group ids and multi-device suffixes, so those chats never moved up
+    the list until the slow fallback poll came round."""
+    for chat_id in ["254776599915-1497087597@g.us", "254712345678:12@c.us",
+                    "120363111122223333@g.us", "254712345678@c.us"]:
+        r = client.post("/wa-event", json={"chat_id": chat_id}, headers={"x-bridge-token": "bridge-secret"})
+        assert r.status_code == 200, chat_id
+
+
+def test_something_that_is_not_a_conversation_still_cannot_ping(client):
+    for chat_id in ["status@broadcast", "abc@newsletter", "", "../../etc/passwd"]:
+        assert client.post("/wa-event", json={"chat_id": chat_id}, headers={"x-bridge-token": "bridge-secret"}).status_code == 422

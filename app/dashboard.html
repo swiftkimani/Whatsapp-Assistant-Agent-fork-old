@@ -1706,6 +1706,16 @@
     } catch (err) { panel.replaceChildren(note(err.message)); }
   }
 
+  // Reordering the list is cheaper than re-reading a thread, but it is still
+  // real work in the bridge's browser, so it keeps its own floor.
+  let waListAt = 0;
+  async function loadListOnly() {
+    if (waBusy || Date.now() - waListAt < 4000) return;
+    waListAt = Date.now();
+    waBusy = true;
+    try { await loadWaChats(); } finally { waBusy = false; }
+  }
+
   async function loadWa(toBottom) {
     if (waBusy) return;          // reading drives the browser session; one at a time
     waBusy = true;
@@ -1768,7 +1778,12 @@
         if (Date.now() - waBadgeAt > WA_BACKGROUND) { waBadgeAt = Date.now(); loadWaChats(); }
         return;
       }
-      if (waChat && !openMoved) return;    // the movement was in another conversation
+      // A message arriving in another conversation used to be ignored outright
+      // while a thread was open — which is nearly always — so the list sat up
+      // to a minute stale: wrong order, wrong previews, wrong unread counts,
+      // exactly the thing the phone gets right. Refresh the list either way;
+      // only re-read the open thread when the movement was in it.
+      if (waChat && !openMoved) { loadListOnly(); return; }
       loadWa();
     }, WA_COALESCE);
   }

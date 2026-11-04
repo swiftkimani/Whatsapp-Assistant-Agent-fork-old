@@ -106,7 +106,10 @@ def _require_bridge(token: str) -> None:
 
 
 class ChatEvent(BaseModel):
-    chat_id: str = Field(pattern=r"^\d+@(c\.us|lid|g\.us)$")
+    # Same shape as CONVERSATION_ID above: a classic group id carries a hyphen
+    # and a multi-device chat a colon, and this rejected both — so the pane
+    # never got told those conversations had moved.
+    chat_id: str = Field(pattern=r"^\d[\d:-]*@(c\.us|lid|g\.us)$")
 
 
 @app.post("/wa-event")

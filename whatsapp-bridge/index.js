@@ -262,7 +262,11 @@ startBridgeApi(client, link);
 // no message text passes through here, and this is NOT the agent's path —
 // that stays below, behind the allowlist. "message_create" rather than
 // "message" so what you send from your own phone shows up too.
-const CHAT_ID = /^\d+@(c\.us|lid|g\.us)$/;
+// Must match wa_read.js: a classic group is "<creator>-<created>@g.us" and a
+// multi-device chat can carry a ":12" suffix. Requiring all digits meant those
+// conversations never sent an activity ping, so the pane only ever noticed
+// them on its 60-second fallback poll.
+const CHAT_ID = /^\d[\d:-]*@(c\.us|lid|g\.us)$/;
 
 client.on("message_create", async (msg) => {
   const chatId = String((msg.fromMe ? msg.to : msg.from) || "");
