@@ -442,6 +442,11 @@
          border-radius:var(--r-pill);font-size:var(--f-xs);font-weight:700;
          color:var(--primary-fg);background:var(--primary)}
   .mrow.by-assistant{border-inline-start:3px solid var(--primary)}
+  /* On the owner's own bubble the badge would sit on the brand colour and
+     vanish into it, so there it inverts. */
+  .msg .by-ai{margin-inline-start:0;background:var(--primary-fg);color:var(--primary)}
+  .msg-foot{display:flex;gap:var(--s2);align-items:center;margin-top:var(--s1)}
+  .msg-foot time{margin:0}
   .listen{display:inline-block;margin-top:var(--s2);padding:var(--s1) var(--s3);font-size:var(--f-sm);font-weight:500;
           border-radius:var(--r-pill);color:var(--text);border:1px solid var(--border);background:var(--surface)}
   .listen:hover{background:var(--surface-raised)}
@@ -1394,7 +1399,7 @@
       const sender = out ? (BY[m.outcome] || "You") : null;
       const who = el("span", "who", out ? `${sender} → ${m.name || "Unknown"}` : (m.name || "Unknown"));
       meta.append(who, ` · ${fmtTime(m.ts)}`);
-      if (m.outcome === "auto") meta.append(el("span", "by-ai", "AI sent"));
+      if (SENT_BY[m.outcome]) meta.append(el("span", "by-ai", SENT_BY[m.outcome]));
       else if (OUTCOME[m.outcome]) meta.append(` · ${OUTCOME[m.outcome]}`);
       const body = el("div", "", m.body);
       body.dir = "auto";
@@ -1768,6 +1773,15 @@
     return null;
   }
 
+  // What the server reports in `sent_by`, in words. A message with no entry
+  // here is one the owner sent themselves — from their phone, or from the box
+  // at the bottom of this page — and saying so on every one of those would be
+  // noise. Only the ones the assistant wrote are worth marking.
+  const SENT_BY = {
+    auto: "AI sent",
+    held_sent: "AI wrote it · you approved",
+  };
+
   function waBubble(m, chatId) {
     const bubble = el("div", `msg ${m.from_me ? "me" : "bot"}`);
     if (m.kind) bubble.append(el("strong", "wa-kind", m.kind));
@@ -1816,7 +1830,13 @@
     }
     const stamp = el("time", "", when(m.ts));
     stamp.dateTime = new Date(m.ts * 1000).toISOString();
-    bubble.append(stamp);
+    const foot = el("div", "msg-foot");
+    // WhatsApp shows nothing to tell these apart — an outgoing message is an
+    // outgoing message — so a reply she sent by herself reads exactly like one
+    // typed on the phone unless it is said here.
+    if (SENT_BY[m.sent_by]) foot.append(el("span", "by-ai", SENT_BY[m.sent_by]));
+    foot.append(stamp);
+    bubble.append(foot);
     return bubble;
   }
 

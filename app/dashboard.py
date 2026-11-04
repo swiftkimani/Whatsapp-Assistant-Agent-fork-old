@@ -32,7 +32,7 @@ from typing import Literal
 from app import bridge
 from app import contacts as contacts_store
 from app import llm
-from app import db, live
+from app import db, live, sent_marks
 from app.log import log_event
 from app.stt import transcribe_bytes
 from app.tts import synthesize_bytes
@@ -516,6 +516,13 @@ async def wa_thread(chat_id: str = Query(pattern=ANY_CHAT_ID), limit: int = Quer
     data = await _bridge_read("/thread", {"chat_id": chat_id, "limit": limit}, timeout=90)
     chat = data.get("chat") or {}
     chat["assistant"] = _assistant_state(chat_id, chat.get("is_group", False))
+    # Who actually sent each outgoing message. One query for the whole thread,
+    # bounded by the oldest message on screen rather than the whole log.
+    messages = data.get("messages") or []
+    if messages:
+        oldest = min(float(m.get("ts") or 0) for m in messages)
+        sent_marks.mark(messages, db.outgoing_for_chat(
+            chat_id, oldest - sent_marks.WINDOW_SECONDS))
     data["default_mode"] = db.default_mode()
     return data
 

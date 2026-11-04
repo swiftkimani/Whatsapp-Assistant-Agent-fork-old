@@ -264,6 +264,21 @@ def purge_messages(days: int | None = None) -> int:
     return deleted
 
 
+def outgoing_for_chat(chat_id: str, since: float, limit: int = 300) -> list[dict]:
+    """What this conversation was sent by the assistant or from the dashboard.
+
+    Used to tell a reply the assistant wrote by itself apart from one the
+    owner typed on their phone, which WhatsApp's own thread cannot do.
+    """
+    with _db() as c:
+        rows = c.execute(
+            "SELECT ts, body, outcome, direction FROM message_log "
+            "WHERE chat_id = ? AND direction = 'out' AND ts >= ? "
+            "ORDER BY id DESC LIMIT ?",
+            (chat_id, since, max(1, min(limit, 500))))
+        return [dict(r) for r in rows]
+
+
 def query_messages(name: str | None = None, since: float | None = None, until: float | None = None,
                    direction: str | None = None, limit: int = 100) -> list[dict]:
     sql, params = "SELECT ts, chat_id, name, direction, body, outcome FROM message_log WHERE 1=1", []

@@ -1,6 +1,7 @@
 """The dashboard's WhatsApp pane: reading the owner's own threads and answering
 them. The shaping of chats and messages happens in whatsapp-bridge/wa_read.js
 and is tested there (npm test)."""
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -69,8 +70,33 @@ def test_each_chat_says_what_the_assistant_will_do_with_it(signed_in, bridge):
 def test_a_thread_is_asked_for_by_chat_id(signed_in, bridge):
     r = signed_in.get("/api/wa/thread", params={"chat_id": "254712345678@c.us", "limit": 10})
     assert r.status_code == 200
-    assert r.json()["messages"] == THREAD["messages"]
+    # Everything the bridge shaped, plus who sent it. The field is on every
+    # message, including incoming ones, because the page reads it on each.
+    assert r.json()["messages"] == [{**m, "sent_by": ""} for m in THREAD["messages"]]
     assert bridge.calls[0]["payload"] == {"chat_id": "254712345678@c.us", "limit": 10}
+
+
+def test_a_reply_the_assistant_sent_is_named_as_hers(signed_in, bridge):
+    """WhatsApp reports an outgoing message and nothing more, so without this
+    a reply she sent by herself reads exactly like one typed on the phone.
+
+    The log row is stamped as it is written, so the thread is dated from the
+    same clock — a fixed fixture timestamp would sit a year from "now" and
+    fall outside the matching window, which is the correct behaviour but not
+    what this test is for."""
+    chat_id = "254712345678@c.us"
+    now = time.time()
+    bridge.replies["/thread"] = (200, {
+        "chat": THREAD["chat"],
+        "messages": [
+            {"id": "A", "ts": now - 60, "from_me": False, "author": "", "body": "niaje", "kind": ""},
+            {"id": "B", "ts": now - 20, "from_me": True, "author": "", "body": "Niko poa, na wewe?", "kind": ""},
+            {"id": "C", "ts": now, "from_me": True, "author": "", "body": "Typed on the phone", "kind": ""},
+        ],
+    })
+    db.log_message(chat_id, "Jane", "out", "Niko poa, na wewe?", "auto")
+    messages = signed_in.get("/api/wa/thread", params={"chat_id": chat_id}).json()["messages"]
+    assert [m["sent_by"] for m in messages] == ["", "auto", ""]
 
 
 @pytest.mark.parametrize("chat_id", ["", "not-an-id", "254712345678", "254712345678@c.us; rm -rf /",
