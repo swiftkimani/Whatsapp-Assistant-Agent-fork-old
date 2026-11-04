@@ -121,8 +121,21 @@ function startBridgeApi(client, link) {
         // Neither route marks anything as seen: opening a thread on the
         // dashboard must not send a read receipt to the other person.
         if (req.url === "/chats") {
-          const limit = Math.min(Number(data.limit) || DEFAULT_CHATS, 100);
-          const chats = shapeChats(await client.getChats(), { limit });
+          const limit = Math.min(Number(data.limit) || DEFAULT_CHATS, 200);
+          // One call for the whole blocked list, rather than a contact lookup
+          // per chat: that would be another browser round trip each.
+          let blocked = new Set();
+          try {
+            blocked = new Set((await client.getBlockedContacts())
+              .map((c) => (c && c.id && (c.id._serialized || c.id.$1)) || "")
+              .filter(Boolean));
+          } catch (err) {
+            // Showing a blocked contact is worse than showing none of the
+            // list, so say so rather than carrying on silently.
+            console.error("Could not read the blocked list:", err.message);
+            return reply(503, { error: "could not read the blocked list" });
+          }
+          const chats = shapeChats(await client.getChats(), { limit, blocked });
           console.log(`[read] /chats returned=${chats.length}`);   // no names, numbers or text
           return reply(200, { chats });
         }

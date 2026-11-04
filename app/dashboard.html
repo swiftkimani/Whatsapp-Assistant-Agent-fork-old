@@ -119,6 +119,14 @@
   .wa-ai input{width:auto;padding:0;margin:0;accent-color:var(--primary)}
   .wa-ai.on{color:var(--primary);border-color:var(--primary)}
   .wa-ai.muted{display:none}          /* a group cannot be answered; saying so on every row is noise */
+  .wa-search{width:100%}
+  .wa-filters{display:flex;gap:var(--s1);flex-wrap:wrap}
+  .wa-filters button{padding:2px var(--s2);border-radius:var(--r-pill);font-size:var(--f-xs);
+                     font-weight:600;color:var(--text-muted);background:var(--surface);
+                     border:1px solid var(--border)}
+  .wa-filters button[aria-pressed="true"]{color:var(--primary-fg);background:var(--primary);
+                     border-color:var(--primary)}
+  .wa-count{font-size:var(--f-xs);color:var(--text-muted)}
   .wa-row.wa-assistant{border-color:var(--primary);background:var(--primary-weak)}
   .wa-row.wa-assistant .avatar{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   #assistantPane{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s2)}
@@ -379,6 +387,9 @@
           <strong class="wa-who">Chats</strong>
           <button id="waRefresh" class="ghost" type="button">Refresh</button>
         </div>
+        <input id="waSearch" class="wa-search" type="search" autocomplete="off"
+               placeholder="Search conversations" aria-label="Search conversations">
+        <div id="waFilters" class="wa-filters" role="group" aria-label="Filter conversations"></div>
         <div id="waList" class="panel"></div>
       </div>
       <div class="wa-col wa-thread-col">
@@ -1572,6 +1583,56 @@
     return row;
   }
 
+  // Every chat the bridge last reported, so filtering and searching are
+  // instant and cost no round trip through the browser session.
+  let waChats = [];
+  let waFilter = "all";
+
+  const WA_FILTERS = {
+    all:      { label: "All",      keep: () => true },
+    ai:       { label: "AI on",    keep: (c) => c.assistant && c.assistant.auto },
+    noai:     { label: "AI off",   keep: (c) => c.assistant && c.assistant.can_choose && !c.assistant.auto },
+    unread:   { label: "Unread",   keep: (c) => c.unread > 0 },
+    direct:   { label: "Direct",   keep: (c) => !c.is_group },
+    groups:   { label: "Groups",   keep: (c) => c.is_group },
+    archived: { label: "Archived", keep: (c) => c.archived },
+  };
+
+  function renderWaFilters() {
+    const host = $("waFilters");
+    if (host.children.length) return;        // built once; only the state changes
+    for (const [key, f] of Object.entries(WA_FILTERS)) {
+      const b = btn(f.label, "");
+      b.dataset.filter = key;
+      b.onclick = () => { waFilter = key; paintWaList(); };
+      host.append(b);
+    }
+  }
+
+  function paintWaList() {
+    renderWaFilters();
+    for (const b of $("waFilters").children) {
+      b.setAttribute("aria-pressed", String(b.dataset.filter === waFilter));
+    }
+    const term = $("waSearch").value.trim().toLowerCase();
+    const keep = WA_FILTERS[waFilter].keep;
+    // Archived chats are hidden unless asked for: they are archived.
+    const shown = waChats.filter((c) =>
+      (waFilter === "archived" || !c.archived) &&
+      keep(c) &&
+      (!term || (c.name || "").toLowerCase().includes(term)));
+
+    const rows = shown.map(waChatRow);
+    const summary = el("p", "wa-count",
+      shown.length === waChats.length
+        ? `${waChats.length} conversations`
+        : `${shown.length} of ${waChats.length} conversations`);
+    $("waList").replaceChildren(assistantRow(), summary, ...(rows.length
+      ? rows
+      : [note(term ? "Nothing matches that." : "Nothing in this filter.")]));
+    markOpenRow($("assistantPane").hidden ? waChat : ASSISTANT);
+  }
+
   async function loadWaChats() {
     if (await showLinkIfNeeded()) return;
     try {
@@ -1583,10 +1644,13 @@
       const badge = $("waUnread");
       badge.textContent = unread > 99 ? "99+" : String(unread);
       badge.hidden = !unread;
-      $("waList").replaceChildren(assistantRow(), ...(chats.length
-        ? chats.map(waChatRow)
-        : [note("No conversations yet. Once someone messages you they show up here.")]));
-      markOpenRow($("assistantPane").hidden ? waChat : ASSISTANT);
+      waChats = chats;
+      if (!chats.length) {
+        $("waList").replaceChildren(assistantRow(),
+          note("No conversations yet. Once someone messages you they show up here."));
+        return;
+      }
+      paintWaList();
     } catch (err) { $("waList").replaceChildren(assistantRow(), note(err.message)); }
   }
 
@@ -1683,6 +1747,8 @@
     markOpenRow("");
   };
   $("waRefresh").onclick = () => loadWa();
+  // Filtering is local, so it costs nothing and needs no debounce.
+  $("waSearch").oninput = () => { if (waChats.length) paintWaList(); };
 
   // ---- live: the bridge nudges the backend, the backend nudges this page ----
   // The nudge is only a chat id, so the conversation itself still comes from

@@ -21,7 +21,7 @@ const message = (over = {}) => ({
 test("a chat is reduced to what the dashboard shows", () => {
   assert.deepStrictEqual(shapeChats([chat({ unreadCount: 3 })]), [{
     id: "254712345678@c.us", name: "Jane", is_group: false,
-    unread: 3, ts: 1200, preview: "niaje", from_me: false,
+    unread: 3, ts: 1200, preview: "niaje", from_me: false, archived: false,
   }]);
 });
 
@@ -167,4 +167,32 @@ test("an unknown media type is labelled rather than dropped", () => {
   const [m] = shapeMessages([msg({ hasMedia: true, type: "something_new" })]);
   assert.strictEqual(m.kind, "Attachment");
   assert.strictEqual(m.render_as, "");
+});
+
+
+// ---- blocked and archived ----
+
+test("a blocked contact's chat is left out entirely", () => {
+  // WhatsApp keeps blocked people in its own chat list, so without this they
+  // appear here as ordinary conversations the assistant offers to answer.
+  const chats = [chat({ id: { _serialized: "254712345678@c.us" }, name: "Kawira" }),
+                 chat({ id: { _serialized: "254700000000@c.us" }, name: "Blocked" })];
+  const out = shapeChats(chats, { blocked: new Set(["254700000000@c.us"]) });
+  assert.deepStrictEqual(out.map((c) => c.name), ["Kawira"]);
+});
+
+test("no blocked list means nothing is dropped", () => {
+  const chats = [chat({ id: { _serialized: "254712345678@c.us" }, name: "Kawira" })];
+  assert.strictEqual(shapeChats(chats).length, 1);
+});
+
+test("an archived chat is reported as archived rather than dropped", () => {
+  // Dropping it is how a conversation goes missing with nothing to explain it.
+  const [c] = shapeChats([chat({ id: { _serialized: "254712345678@c.us" }, archived: true })]);
+  assert.strictEqual(c.archived, true);
+});
+
+test("an ordinary chat is not marked archived", () => {
+  const [c] = shapeChats([chat({ id: { _serialized: "254712345678@c.us" } })]);
+  assert.strictEqual(c.archived, false);
 });

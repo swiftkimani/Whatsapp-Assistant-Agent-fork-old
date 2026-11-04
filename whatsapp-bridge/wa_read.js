@@ -56,9 +56,17 @@ function chatName(chat, id) {
   return domain === "c.us" ? local : "Unknown";
 }
 
-function shapeChats(chats, { limit = DEFAULT_CHATS } = {}) {
+/**
+ * @param {object} [opts]
+ * @param {Set<string>} [opts.blocked] ids the owner has blocked. Their chats
+ *        stay in WhatsApp's own list, so without this they appear here as
+ *        ordinary conversations the assistant offers to answer — which is the
+ *        opposite of what blocking someone means.
+ */
+function shapeChats(chats, { limit = DEFAULT_CHATS, blocked = new Set() } = {}) {
   return (chats || [])
     .filter((chat) => chat && chat.id && CHAT_ID.test(chat.id._serialized || ""))
+    .filter((chat) => !blocked.has(chat.id._serialized))
     .map((chat) => {
       const id = chat.id._serialized;
       const last = chat.lastMessage;
@@ -71,6 +79,10 @@ function shapeChats(chats, { limit = DEFAULT_CHATS } = {}) {
         ts: Number(last ? last.timestamp : chat.timestamp) || 0,
         preview: body || (last && last.hasMedia ? mediaLabel(last.type) : ""),
         from_me: Boolean(last && last.fromMe),
+        // Archived chats are still chats. They are reported so the dashboard
+        // can set them aside rather than silently dropping them, which is how
+        // a conversation goes missing with nothing to explain it.
+        archived: Boolean(chat.archived),
       };
     })
     // Most recently active first, which is the order WhatsApp itself shows.
