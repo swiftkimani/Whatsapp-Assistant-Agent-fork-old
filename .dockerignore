@@ -18,6 +18,13 @@ whatsapp-bridge/node_modules/
 .env.*
 !.env.example
 data/
+# The linked WhatsApp session. Nothing COPYs it, so it never reached a layer,
+# but 106 MB of live credential material was being handed to the Docker daemon
+# on every build for no reason. The bridge's own copy was already excluded;
+# this is the one at the repository root.
+.wwebjs_auth/
+**/.wwebjs_auth/
+backups/
 contacts.json
 whatsapp-bridge/.wwebjs_auth/
 whatsapp-bridge/.wwebjs_cache/

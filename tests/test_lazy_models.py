@@ -74,6 +74,32 @@ def whisper(monkeypatch):
     return SimpleNamespace(stt=_load_real_module("stt"), loads=loaded)
 
 
+def test_asking_for_no_size_follows_whisper_model_size(whisper):
+    """docker-compose.yaml leaves DASHBOARD_WHISPER_SIZE empty so that the
+    dashboard and the webhook share one loaded model instead of holding two
+    sets of weights. app/dashboard.py turns that empty value into None; this is
+    the other end of that path, and the reason the compose comment can promise
+    one model."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("WHISPER_MODEL_SIZE", "base")
+        assert whisper.stt._acquire_model(None)[0] == "base"
+        whisper.stt._release_model("base")
+        # A size the caller did name still wins, which is what opting into a
+        # second model looks like.
+        assert whisper.stt._acquire_model("small")[0] == "small"
+
+    assert whisper.loads == ["base", "small"]
+
+
+def test_the_default_size_matches_the_one_docker_compose_deploys(whisper):
+    """With nothing in the environment the code has to land on the same size
+    the deployed container asks for, or a local run and the VPS disagree about
+    how much memory a voice note costs — 139 MiB of weights against 461."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.delenv("WHISPER_MODEL_SIZE", raising=False)
+        assert whisper.stt._acquire_model(None)[0] == "base"
+
+
 def test_a_model_used_moments_ago_is_not_evicted(whisper):
     size, model = whisper.stt._acquire_model("small")
     whisper.stt._release_model(size)

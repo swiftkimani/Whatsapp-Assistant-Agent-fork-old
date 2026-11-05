@@ -59,9 +59,55 @@ services:
       USER_NAME: ${USER_NAME:-}
       ASSISTANT_NAME: ${ASSISTANT_NAME:-Arianna}
       ASSISTANT_NICKNAMES: ${ASSISTANT_NICKNAMES:-Arie}
+      # Still "en" and not "auto". Forcing English mangles a Kiswahili voice
+      # note, but letting Whisper choose measured no better: across 16 clips
+      # "auto" moved Kiswahili from 1.30 to 0.96 word error rate at "base" and
+      # made Sheng worse (0.90 to 1.04), left both unchanged at "small", and
+      # costs a second decode pass when it changes its mind. Numbers in
+      # docs/host-memory.md.
       STT_LANGUAGE: ${STT_LANGUAGE:-en}
-      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-small}
-      DASHBOARD_WHISPER_SIZE: ${DASHBOARD_WHISPER_SIZE:-small}
+
+      # "base", not "small". Measured here with scripts/measure_whisper.py and
+      # 16 synthetic clips (Kenyan English, Kiswahili, Sheng):
+      #
+      #   size    int8 weights   peak RSS   per 5 s clip   English WER
+      #   tiny         72 MiB     350 MiB        0.35 s           0.02
+      #   base        139 MiB     398 MiB        0.82 s           0.02
+      #   small       461 MiB     742 MiB        1.50 s           0.01
+      #
+      # "small" costs 323 MiB of weights that stay resident between voice
+      # notes, and buys one word in seventy-two of English. It buys nothing on
+      # Kiswahili or Sheng: those fail at every size (0.85 to 1.26 WER, and one
+      # clip hallucinates unrelated English at "small" as well), so model size
+      # is not the lever for them.
+      #
+      # Not "tiny", which scored the same on English: these clips are clean
+      # text-to-speech, the kindest audio Whisper ever gets, and nothing
+      # measured here stands in for a bad line or a noisy matatu. "base" keeps
+      # a margin for 66 MiB.
+      WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+
+      # Empty on purpose: that empty value is the memory decision. app/
+      # dashboard.py reads it as `os.getenv(...) or None` and app/stt.py
+      # answers a None with WHISPER_MODEL_SIZE, so empty means the dashboard
+      # and the webhook share ONE loaded model. Naming a size here opts into a
+      # second one — app/stt.py caches one model per distinct size, so two
+      # sizes means both sets of weights resident at once.
+      DASHBOARD_WHISPER_SIZE: ${DASHBOARD_WHISPER_SIZE:-}
+
+      # Five minutes rather than the fifteen app/stt.py defaults to, because
+      # this is the host that went into swap. The cost is measured: reloading
+      # "base" from the model cache took 0.9 s, paid once by the next voice
+      # note after a five-minute gap. Two honest limits on what it buys. The
+      # eviction only runs when a transcription arrives, so one voice note
+      # followed by a quiet week still holds its model for the week —
+      # app/stt.py explains why it grows no timer for that, and wiring
+      # _evict_idle into /health is the change that would close it. And
+      # handing the pages back to the kernel is glibc's malloc_trim doing its
+      # best: measured on macOS, an evict-and-reload returned nothing at all,
+      # so run scripts/measure_whisper.py on the host to see what it returns
+      # there.
+      MODEL_IDLE_MINUTES: ${MODEL_IDLE_MINUTES:-5}
       TTS_PROVIDER: ${TTS_PROVIDER:-edge}
       TZ: ${TZ:-Africa/Nairobi}
 
@@ -98,18 +144,25 @@ services:
     #
     # app/main.py boots at 135 MiB measured (the interpreter, FastAPI, the
     # Anthropic client and the dashboard; ctranslate2 and Pillow load on
-    # demand, not at import — tests/test_lazy_models.py holds that). One
-    # faster-whisper "small" at int8 measured 610 MiB resident once loaded,
-    # and it stays: the cache is a module-level global, held deliberately so
-    # the next voice note does not pay the load again. A photo is transient
-    # now — Pillow decodes it, scales the long edge to 1568 and frees it
-    # within the request — where it used to add ~1 GB of fp32 weights that
-    # never came back down, plus ~115 MiB just to import torch. So ~800 MiB
-    # accounted for; the rest of the ceiling is allocator retention (which is
-    # what MALLOC_ARENA_MAX above is about) and a request's own buffers.
+    # demand, not at import — tests/test_lazy_models.py holds that). The
+    # default is now "base", which measured 272 MiB of resident growth when it
+    # loads, and it stays: the cache is a module-level global, held
+    # deliberately so the next voice note does not pay the load again. A photo
+    # is transient now — Pillow decodes it, scales the long edge to 1568 and
+    # frees it within the request — where it used to add ~1 GB of fp32 weights
+    # that never came back down, plus ~115 MiB just to import torch. So
+    # ~410 MiB accounted for, down from ~800 when this was "small"; the rest of
+    # the ceiling is allocator retention (which is what MALLOC_ARENA_MAX above
+    # is about) and a request's own buffers.
     #
-    # So raising WHISPER_MODEL_SIZE or DASHBOARD_WHISPER_SIZE past "small"
-    # means raising this too: "medium" is roughly another 1.2 GiB, and
+    # 1536m stays, even though the accounted figure halved. A limit is a
+    # ceiling: lowering it frees nothing until something tries to pass it, and
+    # the job it is doing here is capping a runaway, which it does as well at
+    # 1536m as at any lower number. What actually came off the host is the
+    # 323 MiB of weights that are no longer loaded.
+    #
+    # Raising WHISPER_MODEL_SIZE or DASHBOARD_WHISPER_SIZE means raising this
+    # too: "small" is 461 MiB of weights and "medium" roughly 1.2 GiB, and
     # app/stt.py keeps one loaded model per distinct size — two sizes set to
     # "medium" would not fit under this at all.
     #
@@ -217,6 +270,19 @@ services:
     # again. On a machine with 11.7 GB there is no reason to take that bet to
     # save a gigabyte nothing else is asking for.
     #
+    # Left at 3072m deliberately while chasing the host's swap, and that is
+    # worth saying plainly because the number looks like the obvious thing to
+    # cut. It is not: this reserves nothing, so lowering it to 2048m would free
+    # exactly zero bytes unless the bridge's working set is between the two —
+    # in which case the kernel kills it mid-sync instead. Under cgroup v2 a
+    # tighter ceiling can even push the reported swap figure UP, because
+    # nearing memory.max forces reclaim and reclaim is what writes anonymous
+    # pages to swap. Nothing here can measure Chromium's real working set:
+    # there is no WhatsApp session and no docker daemon on the development
+    # machine. The host can, and docs/host-memory.md has the commands —
+    # memory.peak under 1.5 GiB over a week would make 2048m defensible, and
+    # it would still save nothing.
+    #
     # cpus 2, not 1.5: this was sustaining 200–280% of one core, so 1.5 would
     # have cut the initial sync roughly in half for no gain on a 6-core host.
     # It still holds the container to a third of the machine.
@@ -229,13 +295,25 @@ services:
           memory: 512m
 
 volumes:
-  # The SQLite database, held queue, your notes and contacts.json.
+  # The SQLite database, held queue, your notes and contacts.json. Backed up
+  # by scripts/wa_backup.sh, which copies the database with VACUUM INTO rather
+  # than cp — this one is in WAL mode and a cp of a live WAL database is a
+  # coin toss.
   app-data:
   # Whisper's weights, downloaded through HF_HOME on the first voice note.
-  # Without this every deploy re-downloads them.
+  # Without this every deploy re-downloads them. Not worth backing up: it
+  # rebuilds itself from Hugging Face.
   model-cache:
-  # Live credentials for the linked WhatsApp account. Losing this means
-  # scanning the QR again; copying it lets someone else use the account.
+  # Live credentials for the linked WhatsApp account, and the ONLY copy of
+  # something this server cannot recreate: linking a new companion device needs
+  # a passkey ceremony, which needs a real browser and an authenticator, so the
+  # container cannot link itself. Lose this volume and the account's link is
+  # gone with no recovery path from here.
+  #
+  # Back it up with scripts/wa_backup.sh and read docs/session-backup.md first.
+  # Anyone who holds a copy can answer messages as the owner, so a copy is a
+  # credential and belongs where a credential belongs: chmod 600, never in this
+  # repo, never in a bucket, never in a chat.
   wa-session:
 
 networks:

@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import db, groups, live, notify, quiet_hours
+from app import db, groups, live, notify, quiet_hours, stt
 from app.agent_graph import run_agent
 from app.approvals import router as approvals_router
 from app.assistant import router as assistant_router
@@ -354,4 +354,18 @@ async def root():
 
 @app.get("/health")
 async def health():
+    """Also the heartbeat that makes the model idle window a guarantee.
+
+    app/stt.py evicts a loaded Whisper model once it has sat unused, but it
+    only checks when a transcription arrives -- so one voice note and then a
+    quiet week held the model for the week, which is the opposite of what the
+    window is for. Docker already calls this every 30 seconds, so the check
+    costs nothing and now actually runs. Never let it affect the answer: a
+    health check that fails because a model would not unload reports the
+    service as down when it is fine.
+    """
+    try:
+        stt.evict_if_idle()
+    except Exception as err:                     # noqa: BLE001 - never fail health
+        log_event("model_eviction_skipped", level="warning", error=type(err).__name__)
     return {"status": "ok"}

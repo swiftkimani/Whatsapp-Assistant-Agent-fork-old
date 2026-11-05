@@ -43,12 +43,14 @@ _lock = threading.Lock()
 # overrides it ("sw" to bias the other way).
 DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
 
-# One voice note loads 610 MiB of Whisper that used to stay resident until the
-# container was restarted, on a host already 88% into swap. Dropping an idle
-# model costs the next caller the few seconds of a reload; keeping it costs the
-# whole machine for days, so the default leans towards giving the memory back.
-# Fifteen minutes is long enough that a back-and-forth exchange of voice notes
-# pays the load once.
+# One voice note loads a model that used to stay resident until the container
+# was restarted, on a host already 88% into swap — 272 MiB of resident growth
+# for "base" and 562 MiB for "small", measured by scripts/measure_whisper.py.
+# Dropping an idle model costs the next caller a reload (0.9 s for "base" from
+# the model cache); keeping it costs the whole machine for days, so the default
+# leans towards giving the memory back. Fifteen minutes is long enough that a
+# back-and-forth exchange of voice notes pays the load once. The deployed
+# container asks for five instead, and docker-compose.yaml says why there.
 DEFAULT_IDLE_MINUTES = 15.0
 
 
@@ -129,14 +131,39 @@ def _evict_idle(now: float) -> None:
         _return_free_pages()
 
 
+def evict_if_idle() -> None:
+    """Run the idle check from outside a transcription.
+
+    _evict_idle's own docstring names its weakness: checking only on entry
+    means a process that stops receiving voice notes never runs it again, so
+    the last model of a burst stays resident indefinitely. The healthcheck
+    already runs every thirty seconds and is the cheapest heartbeat in the
+    system, so calling this from there turns the idle window from a best case
+    into something close to a guarantee -- without the background timer
+    _evict_idle deliberately refuses to grow, because a timer firing in the
+    middle of a transcription would cost more than the memory it freed.
+
+    Takes the lock, because _evict_idle requires it held. Returns at once when
+    nothing is loaded, which is the usual answer.
+    """
+    if not _models:
+        return
+    with _lock:
+        _evict_idle(time.monotonic())
+
+
 def _acquire_model(size: str | None = None) -> tuple[str, WhisperModel]:
-    """One cached model per size, so WhatsApp voice notes can use 'small' while
-    the dashboard uses a bigger one (DASHBOARD_WHISPER_SIZE=medium).
+    """One cached model per size, so WhatsApp voice notes can use 'base' while
+    the dashboard uses a bigger one (DASHBOARD_WHISPER_SIZE=small).
+
+    That flexibility costs a second set of weights resident, which is why
+    docker-compose.yaml leaves DASHBOARD_WHISPER_SIZE empty: app/dashboard.py
+    turns an empty value into None, and a None lands on the line below.
 
     The caller must pass the returned size to _release_model when it is done,
     or that model can never be evicted again.
     """
-    size = size or os.getenv("WHISPER_MODEL_SIZE", "small")
+    size = size or os.getenv("WHISPER_MODEL_SIZE", "base")
     with _lock:
         now = time.monotonic()
         _evict_idle(now)
