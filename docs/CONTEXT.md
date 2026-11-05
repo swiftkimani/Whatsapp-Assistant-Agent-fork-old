@@ -1,5 +1,5 @@
 # CONTEXT — WhatsApp Assistant Agent
-_Last updated: 2026-11-05_
+_Last updated: 2026-11-05 (second pass)_
 
 ## Current goal
 Make the replies read like the owner wrote them, and make the dashboard
@@ -13,7 +13,7 @@ assistant and saying "the ai is still not smart".
 | Bridge deps | ✅ | installed with `PUPPETEER_SKIP_DOWNLOAD=true`, uses system Chrome |
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
-| Test suite | ✅ | **485 pytest + 201 `node --test`** pass, 0 fail (2026-11-05) |
+| Test suite | ✅ | **620 pytest + 201 `node --test`** pass, 0 fail (2026-11-05) |
 | Dashboard UI | ✅ | chrome moved into a profile sheet; phone-app layout on mobile (`ab3dfb1`, **not yet deployed**) |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
@@ -24,8 +24,44 @@ assistant and saying "the ai is still not smart".
 | Voice examples | ⬜ | `data/style_examples.md` is **still the shipped demo lines**; `POST /api/style/learn` replaces them from his own history and he has not run it |
 | Groups | 🟡 | policy built, stored per group and wired; needs `ALLOW_GROUPS=true` and a group chosen |
 | Auto-deploy | ❌ | the GitHub repo was renamed to `…-fork-old`, so Coolify discards every webhook — **his call to fix** |
+| Session backup | 🟡 | `scripts/wa_backup.sh` + `docs/session-backup.md`; restore tested locally, **the Docker path has never run** |
+| Told when a draft waits | 🟡 | built and wired; the WhatsApp route works as is, web push needs VAPID keys set |
 
 ## Done
+- **2026-11-05 (second pass) — the five things that were missing.**
+  - **Nothing told him a draft was waiting.** There was no notification code
+    in the project at all. Two routes now, both off until switched on, both
+    under quiet hours: a WhatsApp message to himself (capped at one every
+    thirty minutes, carrying a count) and web push. The push carries **no
+    payload** — the browser asks this server how many are waiting when it
+    lands — so nothing about a conversation passes through Google's or
+    Mozilla's servers, and it needs one dependency instead of three.
+  - **Every draft he rewrites is now kept as a style pair.** `send_held` had
+    the draft and the sent text in one line and discarded the difference.
+    The threshold was measured: a typo scores 0.98 similar, a real rewrite
+    0.76 and below, and the cutoff sits in the gap. Two bugs fell out of
+    building it — approvals are threads of one process and the pairs file
+    needed a lock, and "Learn from my chats" would have destroyed every
+    correction on first press.
+  - **Message search**, on FTS5 as an external-content index (no second copy
+    of anyone's words). A POST, because uvicorn logs query strings and a GET
+    would file what he searched for in the container log. Arabic matches
+    whole words only, there is no substring match, emoji are not searchable
+    — measured and pinned by tests, not hoped about.
+  - **A quality report**: sent untouched vs edited vs dismissed, with a
+    trend, refusing a percentage below twenty decisions because at four one
+    draft moves it twenty-five points. Needed a new `was_edited` column —
+    nothing recorded what was actually sent.
+  - **474 MiB of ffmpeg removed from the backend image.** It was installed
+    "because faster-whisper decodes through it"; faster-whisper decodes with
+    PyAV, proven by transcribing with an empty PATH. Whisper also drops to
+    `base`: 323 MiB less resident, English word error 0.01 → 0.02 (one name
+    across 72 words).
+  - **The WhatsApp session has a backup**, with restore tested locally. The
+    session cannot be copied hot — it is a live Chromium profile — so the
+    script stops the bridge, copies, and restarts it, about two to three
+    minutes. The database is copied with `VACUUM INTO`, never `cp`: WAL mode
+    means the committed state spans three files.
 - **2026-11-05 — replies are written properly, and she knows her own name.**
   He pasted a transcript: "im good thanks!! how about you" and, asked "arie or
   kim?", an answer to a different message entirely. Three separate causes.
@@ -735,6 +771,20 @@ Any setting stored in `data/assistant.db` — the kill switch, direct send,
 per-contact modes — has to be set again per deployment.
 
 ## Known issues / deferred
+- **Kiswahili and Sheng voice notes transcribe badly at every Whisper size**
+  (worse than one error per reference word, and one clip hallucinated fluent
+  unrelated English). A bigger model is not the lever; this needs a different
+  model or service. Measured 2026-11-05, see `docs/host-memory.md`.
+- **Coolify still has `WHISPER_MODEL_SIZE=small` saved**, and a saved value
+  beats a compose default, so the host keeps loading the larger model until
+  that field is set to `base` and `DASHBOARD_WHISPER_SIZE` is blanked.
+- `scripts/wa_backup.sh` has never run against Docker — no daemon on the
+  development machine. First host run should be `backup` then `verify`, both
+  read-only, and a `restore --session-dir /tmp/...` rehearsal before any live
+  restore.
+- Swap is read with `vmstat` si/so and `/proc/pressure/memory`, never with
+  "swap used", which is a high-water mark that decays only when something
+  touches the pages. See `docs/host-memory.md`.
 - Whisper handles Kenyan English better than Kiswahili and heavy Sheng worse
   than either, so deep-slang voice notes are the least reliable input.
 - `looks_swahili()` is a word list. A Swahili message containing none of its
