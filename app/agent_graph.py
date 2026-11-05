@@ -20,6 +20,7 @@ class AgentState(TypedDict):
     image_problem: str            # "" | why that photo cannot be sent, for the owner
     resolved_text: str            # original-script text after STT, or the photo placeholder
     history: list[dict]           # this contact's rolling memory buffer
+    direction: str                # "" | the owner's standing instruction for this chat
     reply_text: str
     grounded: bool                # every fact in the reply comes from the prompt
     needs_owner: bool             # only the owner can really answer this
@@ -98,6 +99,7 @@ def generate_reply(state: AgentState) -> AgentState:
         message_type=state["message_type"],
         examples=examples,
         image=state["image"],
+        direction=state["direction"],
     )
     state["reply_text"] = result["reply"]
     state["grounded"] = result["grounded"]
@@ -146,12 +148,16 @@ _compiled_graph = None
 
 
 def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: str | None,
-              mimetype: str | None = None) -> AgentState:
+              mimetype: str | None = None, direction: str = "") -> AgentState:
     """`mimetype` is the media type the bridge read off the WhatsApp message
     (IncomingMessage.mimetype in app/main.py). It is optional because the photo
     is also identified from its own bytes, so a caller that does not pass it
     still gets an answered photo — it only loses the earlier, cheaper check on
-    a format the API cannot take."""
+    a format the API cannot take.
+
+    `direction` is the owner's standing instruction for this conversation,
+    loaded by the caller (which is the side that knows whose chat this is).
+    Empty means she writes exactly as she does everywhere else."""
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = build_graph()
@@ -166,6 +172,7 @@ def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: s
         "image_problem": "",
         "resolved_text": "",
         "history": [],
+        "direction": direction,
         "reply_text": "",
         "grounded": False,
         "needs_owner": True,

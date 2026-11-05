@@ -24,7 +24,7 @@ import httpx
 from app import bridge
 from app import contacts as contacts_store
 from app.contacts import name_for
-from app.controls import router as controls_router
+from app.controls import readable_who, router as controls_router
 from app.dashboard import router as dashboard_router
 from app.log import anon, log_event
 from app.memory import add_assistant_message, add_user_message
@@ -182,6 +182,41 @@ def _should_quote(msg: "IncomingMessage", model_said: bool) -> bool:
     return model_said
 
 
+def _self_log_who(msg: "IncomingMessage", name: str) -> str:
+    """Who the copy in the owner's own chat says the reply went to.
+
+    This lands on his own phone, so it has to be somebody he recognises. The
+    fallback used to be `msg.from_.split("@")[0]`, which for an @lid privacy id
+    is fifteen opaque digits — so every self-logged reply read "Arianna replied
+    to 143941634654250". The ladder is the one readable_who() in app/controls.py
+    and _who() in app/approvals.py already settled on, best first: the name he
+    saved, the name they chose for themselves, a number he could dial, then an
+    honest generic word. Never the raw id.
+
+    groups.speaker_label() does the sanitising of a self-chosen name rather
+    than a third copy of it: the note is "...replied to {who}:" followed by a
+    blank line, so a display name carrying a colon or a line break could forge
+    a line of a message sent on his account.
+
+    A group takes the generic word instead of the display name or the number,
+    both of which belong to whoever happened to speak last rather than to the
+    conversation the reply actually went to. app/approvals.py draws the same line.
+    """
+    if name:
+        return name
+    # The address book has already been asked — `name` is what it said — so
+    # readable_who is given an empty one rather than made to read it again.
+    if msg.is_group:
+        return readable_who(msg.from_, "", {})
+    if (msg.push_name or "").strip():
+        return groups.speaker_label({"sender_name": msg.push_name})
+    digits = _digits(msg.number or "")
+    if digits:
+        return f"+{digits}"
+    # A number for an @c.us chat, "Unknown contact" for a privacy id.
+    return readable_who(msg.from_, "", {})
+
+
 def _model_text(msg: "IncomingMessage") -> str:
     """What the model is asked to answer.
 
@@ -257,6 +292,12 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         log_event("ignored", chat=anon(msg.from_), known=bool(name))
         return {"action": "ignore"}
 
+    # How the owner has asked her to write in this one conversation, if he has
+    # asked at all. Read here rather than inside the graph because this is the
+    # side that knows which conversation the message arrived in, and read after
+    # the gates above so an ignored message still costs nothing but a check.
+    steer = db.get_direction(msg.from_)
+
     # run_agent is blocking (LLM, Whisper, BLIP): keep it off the event loop
     result = await run_in_threadpool(
         run_agent,
@@ -269,6 +310,7 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         # it the type is still read off the bytes; this only makes the
         # rejection earlier and cheaper.
         mimetype=msg.mimetype,
+        direction=steer["text"] if steer else "",
     )
 
     add_user_message(msg.from_, result["resolved_text"])
@@ -304,7 +346,7 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         return {"action": "hold", "reply_text": result["reply_text"], "reason": reason}
 
     add_assistant_message(msg.from_, result["reply_text"])
-    await _copy_to_owner(name or (msg.number or msg.from_.split("@")[0]), result["reply_text"])
+    await _copy_to_owner(_self_log_who(msg, name or ""), result["reply_text"])
     db.log("auto_reply", msg.from_)
     db.log_message(msg.from_, name, "in", result["resolved_text"], "replied")
     db.log_message(msg.from_, name, "out", result["reply_text"], "auto")

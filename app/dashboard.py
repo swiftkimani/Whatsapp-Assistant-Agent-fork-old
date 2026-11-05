@@ -33,7 +33,7 @@ from app import bridge
 from app import contacts as contacts_store
 from app import llm
 from app import db, live, sent_marks
-from app.log import log_event
+from app.log import anon, log_event
 from app.stt import transcribe_bytes
 from app.tts import synthesize_bytes
 
@@ -580,6 +580,82 @@ async def set_assistant_for_chat(body: AssistantForChatRequest):
     return {"name": name, "assistant": _assistant_state(body.chat_id)}
 
 
+# ------------------------------------------- steering one conversation ----
+# The three-way setting above says WHETHER she answers this person. These say
+# HOW she writes to them: one short standing instruction in the owner's own
+# words, which every reply in that conversation is then written under. Up to
+# now everything about her voice — data/kb/about_me.md and the style examples —
+# was global, so "keep it short this week, I'm travelling" could only be said
+# about everybody at once.
+#
+# Voice needs nothing new here: the page records with MediaRecorder and posts
+# the bytes to POST /api/transcribe (below), then puts the text it gets back in
+# the box and saves it through these routes. Nothing on this path takes audio.
+
+
+class DirectionRequest(BaseModel):
+    chat_id: str = Field(pattern=ANY_CHAT_ID)
+    # Blank is a real value, not a missing one: it is how the box is emptied,
+    # and db.set_direction() clears the row rather than storing nothing. The
+    # ceiling is the database's own, so a long paste is a field error here
+    # instead of a sentence from a layer below.
+    direction: str = Field(default="", max_length=db.MAX_DIRECTION_CHARS)
+
+
+def _direction_payload(chat_id: str) -> dict:
+    """One conversation's direction, as every route here reports it.
+
+    `direction` is null when the chat is not being steered, and otherwise
+    carries the text and when it was last set — both, because a direction is
+    invisible once saved and "set three weeks ago" is what tells him it is
+    still there from the week he was travelling.
+    """
+    return {"chat_id": chat_id, "direction": db.get_direction(chat_id),
+            "max_chars": db.MAX_DIRECTION_CHARS}
+
+
+@router.get("/api/wa/direction", dependencies=[Depends(require_auth)])
+def read_chat_direction(chat_id: str = Query(pattern=ANY_CHAT_ID)):
+    """How she has been asked to write in this conversation, and when."""
+    return _direction_payload(chat_id)
+
+
+@router.get("/api/wa/directions", dependencies=[Depends(require_auth)])
+def list_chat_directions():
+    """Every conversation being steered, keyed on chat id, in one read.
+
+    So a list of chats can mark the steered ones without asking about each.
+    Only the chats that have one are in it, which is tens of rows at most.
+    """
+    return {"directions": db.all_directions(), "max_chars": db.MAX_DIRECTION_CHARS}
+
+
+@router.post("/api/wa/direction", dependencies=[Depends(require_auth)])
+def write_chat_direction(body: DirectionRequest):
+    """Steer this conversation, or stop steering it by sending nothing."""
+    try:
+        steering = db.set_direction(body.chat_id, body.direction)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+    # Imported here for the reason search_messages() below gives: app.controls
+    # imports require_auth from this module, so a module-level import is a cycle.
+    from app import controls
+
+    # The activity feed renders audit rows, and a direction changing how she
+    # writes to someone is exactly the kind of thing to find there later —
+    # mode_changed is the precedent. The target is who it is about and never
+    # what it says: the feed is read over a shoulder, and the text says things
+    # about a real person.
+    who = controls.readable_who(body.chat_id, "", contacts_store.load())
+    db.log("direction_set" if steering else "direction_cleared", who)
+    # A length and a flag. His own words about somebody he knows are the most
+    # private thing on this page, and they do not go in a log line (§B8).
+    log_event("chat_direction_set", chat=anon(body.chat_id),
+              chars=len(body.direction.strip()), steering=steering)
+    return _direction_payload(body.chat_id)
+
+
 # What a browser may be handed as a picture, a video or a sound. Anything else
 # WhatsApp labels as media is served as a download, never rendered: the page
 # must not be talked into treating an arbitrary file as something to execute.
@@ -990,8 +1066,8 @@ def search_messages(body: MessageSearchRequest):
 
     Words rather than substrings: "bill" finds "the water bill" and "wat"
     finds "water", but "ater" finds nothing, and several words are a phrase.
-    db.search_messages() spells out the rest, including what Arabic and emoji
-    really do.
+    db.search_messages() spells out the rest, including what a Kiswahili
+    prefix and an emoji really do.
 
     Returns {"items": [...], "next_cursor": id|null}. Each item carries the
     chat_id, so the page can open that conversation on the matching message,

@@ -13,8 +13,8 @@ def msg(**over):
 def agent(monkeypatch, fresh_db):
     state = {"action": "send", "hold_reason": ""}
 
-    def fake(contact_id, message_type, raw_text, media_base64, mimetype=None):
-        return {"resolved_text": raw_text, "reply_text": "اه ماشي", **state}
+    def fake(contact_id, message_type, raw_text, media_base64, mimetype=None, direction=""):
+        return {"resolved_text": raw_text, "reply_text": "sawa, niko njiani", **state}
 
     monkeypatch.setattr(main, "run_agent", fake)
     # Someone you have not decided about is held by default, which is the point
@@ -79,7 +79,7 @@ def test_webhook_needs_the_bridge_token(client, agent):
 
 def test_normal_message_is_sent(client, agent):
     r = client.post("/webhook", json=msg(), headers=HEADERS).json()
-    assert r["action"] == "send" and r["reply_text"] == "اه ماشي"
+    assert r["action"] == "send" and r["reply_text"] == "sawa, niko njiani"
 
 
 def test_allowlist_uses_the_number_resolved_by_the_bridge(client, agent, monkeypatch):
@@ -129,10 +129,10 @@ def test_activity_feed_resolves_names(signed_in, agent):
 
 
 def test_messages_endpoint_lists_both_directions(signed_in, agent):
-    signed_in.post("/webhook", json=msg(body="هتيجي؟"), headers=HEADERS)
+    signed_in.post("/webhook", json=msg(body="uko wapi?"), headers=HEADERS)
     items = signed_in.get("/api/messages?range=today").json()["items"]
     assert [(m["direction"], m["name"]) for m in items] == [("out", "Mom"), ("in", "Mom")]
-    assert signed_in.get("/api/messages?contact=mom&direction=received").json()["items"][0]["body"] == "هتيجي؟"
+    assert signed_in.get("/api/messages?contact=mom&direction=received").json()["items"][0]["body"] == "uko wapi?"
     assert signed_in.get("/api/messages?contact=Nobody").status_code == 400
     assert signed_in.get("/api/messages?range=forever").status_code == 422
 

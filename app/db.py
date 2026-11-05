@@ -1,5 +1,5 @@
 """SQLite store (data/assistant.db): held replies, audit log, conversation
-memory, per-contact modes and settings."""
+memory, per-contact modes, per-chat directions and settings."""
 import os
 import sqlite3
 import time
@@ -89,6 +89,12 @@ def init() -> None:
         # "only when somebody is talking to her, and show me first".
         c.execute("""CREATE TABLE IF NOT EXISTS group_modes (
             chat_id TEXT PRIMARY KEY, mode TEXT NOT NULL, delivery TEXT NOT NULL)""")
+        # One row per conversation the owner has steered: the short standing
+        # instruction, in his own words, that every reply in that chat is then
+        # written under. See the block above set_direction() for why neither
+        # settings nor contact_modes can hold it.
+        c.execute("""CREATE TABLE IF NOT EXISTS chat_directions (
+            chat_id TEXT PRIMARY KEY, direction TEXT NOT NULL, set_at REAL NOT NULL)""")
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         c.execute("""CREATE TABLE IF NOT EXISTS message_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, chat_id TEXT, name TEXT,
@@ -353,6 +359,99 @@ def all_modes() -> dict[str, str]:
         return {r["name"]: r["mode"] for r in c.execute("SELECT name, mode FROM contact_modes")}
 
 
+# ---- per-chat direction: how she writes in one conversation ----
+# The modes above decide WHETHER she answers someone. This decides HOW she
+# writes to them: one short standing instruction in the owner's own words —
+# "keep it short this week, I'm travelling", "don't agree to anything about
+# money", "be warmer, she's upset" — which every reply in that conversation is
+# then written under. Everything else about her voice (data/kb/about_me.md and
+# data/style_examples.md) is global, so this was the one thing that could not
+# be said about a single person.
+#
+# Why a table of its own, and why neither existing one can hold it (§D3.1):
+# * `settings` is one flat key/value row per global switch. A per-chat
+#   direction there means a key built out of the chat id — a table pretending
+#   to be a dictionary — and "when was this set" would have to be packed into
+#   `value` as JSON, which is the one thing §D3.1 asks not to do with a column
+#   that is read on every message. "Which chats are steered" would become a
+#   LIKE scan over every setting.
+# * `contact_modes` keys on the contact NAME, so a group chat has nowhere to
+#   sit — the same reason `group_modes` exists — and its one column is a
+#   validated three-value vocabulary. Free text beside it would put two
+#   unrelated decisions in one row.
+# * `group_modes` is groups only, and holds the two questions a group asks.
+# Expected rows: one per conversation deliberately steered, so tens. It is
+# bounded by the people the owner talks to and never grows with messages.
+# Written by the dashboard (POST /api/wa/direction); read by /webhook on every
+# incoming message, and by the dashboard to show that a chat is being steered.
+# chat_id is the primary key and the only way a row is ever looked up, so this
+# needs no index of its own.
+
+# How long a direction may be. It is part of the instructions on every single
+# message in that conversation, so it is a sentence or two and not a second
+# about_me.md: 500 characters is about four lines of dictated speech. Enforced
+# here as well as at the route, because the route is not the only way into this
+# function and a prompt is the wrong place to discover a long paste.
+MAX_DIRECTION_CHARS = 500
+
+
+def get_direction(chat_id: str) -> dict | None:
+    """This conversation's standing instruction and when it was last changed,
+    or None when nobody has steered it.
+
+    The timestamp comes back with the text because a direction is invisible
+    once set: "be brief, I'm travelling" is right for a week and wrong a month
+    later, and how long it has been there is the only thing that says which.
+    """
+    if not chat_id:
+        return None
+    with _db() as c:
+        row = c.execute("SELECT direction, set_at FROM chat_directions WHERE chat_id = ?",
+                        (chat_id,)).fetchone()
+    if not row or not row["direction"]:
+        return None
+    return {"text": row["direction"], "set_at": row["set_at"]}
+
+
+def set_direction(chat_id: str, direction: str) -> bool:
+    """Steer one conversation, or stop steering it. True when a direction was
+    stored, False when it was cleared.
+
+    Blank clears instead of storing: an empty instruction block in the prompt
+    would be a line of ceremony saying nothing, and "" must not become a second
+    way of meaning "no direction" that reads differently to the model. The
+    length is checked rather than truncated, for the reason set_group_policy()
+    validates rather than coerces — a direction silently cut in half mid
+    sentence could say the opposite of what was meant.
+    """
+    if not chat_id:
+        raise ValueError("a direction needs a chat id")
+    text = direction.strip()
+    if len(text) > MAX_DIRECTION_CHARS:
+        raise ValueError(f"a direction is at most {MAX_DIRECTION_CHARS} characters")
+    if not text:
+        clear_direction(chat_id)
+        return False
+    with _db() as c:
+        c.execute("INSERT INTO chat_directions (chat_id, direction, set_at) VALUES (?, ?, ?) "
+                  "ON CONFLICT(chat_id) DO UPDATE SET direction = excluded.direction, "
+                  "set_at = excluded.set_at", (chat_id, text, time.time()))
+    return True
+
+
+def clear_direction(chat_id: str) -> None:
+    """Stop steering this conversation, so it reads like every other one."""
+    with _db() as c:
+        c.execute("DELETE FROM chat_directions WHERE chat_id = ?", (chat_id,))
+
+
+def all_directions() -> dict[str, dict]:
+    """Every conversation being steered, read once for a whole list of chats."""
+    with _db() as c:
+        return {r["chat_id"]: {"text": r["direction"], "set_at": r["set_at"]}
+                for r in c.execute("SELECT chat_id, direction, set_at FROM chat_directions")}
+
+
 # ---- settings (global kill switch) ----
 
 def get_setting(key: str, default: str = "") -> str:
@@ -467,8 +566,9 @@ def query_messages(name: str | None = None, since: float | None = None, until: f
 
 # unicode61 is named rather than left to the default so the matching rules are
 # pinned here instead of inherited from whatever SQLite is in the image.
-# "remove_diacritics 2" is what makes café, cafe and CAFÉ one word; it does not
-# touch Arabic harakat, which stay part of the word (see search_messages).
+# "remove_diacritics 2" is what makes café, cafe and CAFÉ one word. It folds Latin
+# accents only; combining marks in other scripts stay part of the word, and
+# search_messages() spells out what that means for searching.
 _FTS_TOKENIZER = "unicode61 remove_diacritics 2"
 
 MIN_SEARCH_CHARS = 2
@@ -608,11 +708,18 @@ def search_messages(term: str, name: str | None = None, since: float | None = No
       only folds ASCII.
     * Kiswahili and Sheng behave as English does: both are Latin script, so
       "maji", "MAJI" and "pes" all find "Nitatuma pesa ya maji kesho".
-    * Arabic words match as words: "الفاتورة" finds "الفاتورة لازم تتدفع". What
-      does not work is searching for part of one — "فاتورة" does not find
-      "الفاتورة", because the attached article makes a different word, and
-      harakat count as part of the word too, so "مرحبا" does not find "مَرحبًا".
-      A prefix does work ("الفات" finds it), which is the way in.
+    * A word index is a word index, which Kiswahili feels more than English
+      does: number is marked on the front of the word, so "mtoto" does not
+      find "watoto" and the stem "toto" they share finds neither. The
+      apostrophe in "ng'ombe" is a separator too, so that word is indexed as
+      "ng" and "ombe" and the spelling "ngombe" does not find it. A prefix
+      does work ("wato", "ng'omb"), which is the way in.
+    * remove_diacritics 2 folds Latin accents only. Combining characters
+      from anywhere else stay part of the token, which is why a script that
+      writes its vowels or tones as marks has two different words for the
+      marked and unmarked spellings. Nothing in this corpus is written that
+      way; the nearest it comes is the skin-tone modifier inside an emoji,
+      which is a token in its own right while the picture around it is not.
     * No matching on emoji or punctuation: unicode61 treats both as the spaces
       between words, so a search for "😂" or "%" finds nothing at all rather
       than everything. For the same reason "%" and "_" cannot act as wildcards
