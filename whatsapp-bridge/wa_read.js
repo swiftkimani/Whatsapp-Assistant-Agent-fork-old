@@ -76,6 +76,36 @@ function isReactionEmoji(value) {
   return Array.from(GRAPHEMES.segment(value)).length === 1;
 }
 
+// How many emoji WhatsApp still draws large when a message is made of nothing
+// else. WhatsApp's own clients stop at three: past that it is a message
+// written in emoji rather than an emoji sent as the message, and it is laid
+// out as ordinary text.
+const EMOJI_ONLY_MAX = 3;
+
+/**
+ * Whether this message is nothing but a few emoji — "👍", "😂😂", "🎉" — and
+ * so should be drawn large, the way WhatsApp draws it on the phone.
+ *
+ * Said here rather than worked out on the page for the reason the rest of this
+ * file exists: the page would have to do the same grapheme counting in order
+ * to get it right, and getting it wrong is visible. `Array.from(s).length`
+ * counts code points, which makes one family emoji read as seven and one
+ * flag as two, so a message of a single flag would be laid out as text while
+ * a message of one family would be laid out as four emoji too many.
+ *
+ * The pieces an emoji may be built from are the same set `isReactionEmoji`
+ * accepts, and for the same reason: everything else — letters, punctuation,
+ * anything that could read as words — means this is text. Whitespace between
+ * emoji does not, so it is taken out before counting; "👍 👍" is two emoji
+ * and a space, not a sentence.
+ */
+function isEmojiOnly(text) {
+  const compact = String(text || "").replace(/\s+/g, "");
+  if (!compact) return false;
+  if (!EMOJI_PIECES.test(compact) || !EMOJI_PICTURE.test(compact)) return false;
+  return Array.from(GRAPHEMES.segment(compact)).length <= EMOJI_ONLY_MAX;
+}
+
 // How long a pinned message stays pinned, in seconds, under the names
 // WhatsApp's own menu gives them. It offers exactly these three and nothing
 // between, and the library hands the number straight to the page, so a fourth
@@ -105,19 +135,40 @@ function mediaLabel(type) {
   }[type] || "Attachment";
 }
 
-/** One line, for a preview. */
-const clip = (s, max) => {
-  const text = String(s || "").replace(/\s+/g, " ").trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/**
+ * `text` cut to at most `max` characters, never through a character.
+ *
+ * JavaScript measures and slices a string in UTF-16 code units, so a cut at a
+ * fixed offset lands between the two halves of an emoji about half the time —
+ * and a lone surrogate is not text. It survives as far as the JSON on the wire
+ * and then arrives on the page as a replacement glyph: the owner sees "…a�…"
+ * at the end of a preview that was fine on their phone.
+ *
+ * Grapheme clusters are the unit a person reads, and they are what is kept
+ * whole here: an emoji with a skin tone, a family built out of zero-width
+ * joiners, a flag made of two regional indicators and a Devanagari syllable
+ * are each one cluster, each several code units long. Every cluster is either
+ * kept entire or left out entirely.
+ */
+const cutTo = (text, max) => {
+  if (text.length <= max) return text;
+  const budget = max - 1;      // the ellipsis takes the last character
+  let kept = "";
+  for (const { segment } of GRAPHEMES.segment(text)) {
+    if (kept.length + segment.length > budget) break;
+    kept += segment;
+  }
+  return `${kept}…`;
 };
+
+/** One line, for a preview. */
+const clip = (s, max) => cutTo(String(s || "").replace(/\s+/g, " ").trim(), max);
 
 /** The message itself, with its line breaks. A preview has to be one line;
  *  the body does not, and collapsing it turned every multi-line message into
  *  a single run-on line even though the page already renders pre-wrap. */
-const clipBody = (s, max) => {
-  const text = String(s || "").replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-};
+const clipBody = (s, max) => cutTo(
+  String(s || "").replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").trim(), max);
 
 // Types that carry no downloadable file, so hasMedia is false and they used to
 // arrive with no label at all — an empty bubble reading "(no text)".
@@ -443,6 +494,13 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "",
       // — which was being rendered as the message text.
       body: UNDOWNLOADABLE.has(msg.type) && msg.type !== "poll_creation"
         ? "" : clipBody(msg.body, BODY_CHARS),
+      // Whether this message is nothing but a few emoji, which WhatsApp draws
+      // large. Asked of a plain text message and of nothing else: a photo's
+      // caption is laid out as a caption whatever it says, and a poll whose
+      // question happens to be an emoji is still a poll. Read off the raw
+      // body rather than the clipped one because the answer cannot differ —
+      // four emoji are already too many, and nothing that short is clipped.
+      emoji_only: (!msg.type || msg.type === "chat") && isEmojiOnly(msg.body),
       // Anything with no words of its own gets named. A bubble reading
       // "(no text)" tells the owner nothing — a voice note should say it is a
       // voice note whether or not its file can be fetched.
@@ -503,7 +561,7 @@ function shapeMessages(messages, { limit = DEFAULT_MESSAGES, me = "",
 module.exports = {
   shapeChats, shapeMessages, mediaLabel, chatName, renderAs,
   idParts, sameAccount, hasLeftGroup, groupEvent,
-  isReactionEmoji, inGroup, canDeleteForEveryone,
+  isReactionEmoji, isEmojiOnly, inGroup, canDeleteForEveryone,
   CHAT_ID, MESSAGE_ID, DEFAULT_CHATS, DEFAULT_MESSAGES,
-  PIN_DURATIONS, REVOKE_WINDOW_SECONDS,
+  PIN_DURATIONS, REVOKE_WINDOW_SECONDS, EMOJI_ONLY_MAX,
 };

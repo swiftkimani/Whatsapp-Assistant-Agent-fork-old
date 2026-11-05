@@ -1,9 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const { after } = require("node:test");
-const { shapeChats, shapeMessages, MESSAGE_ID, isReactionEmoji,
-  canDeleteForEveryone, PIN_DURATIONS, REVOKE_WINDOW_SECONDS } = require("./wa_read");
+const { shapeChats, shapeMessages, MESSAGE_ID, isReactionEmoji, isEmojiOnly,
+  canDeleteForEveryone, PIN_DURATIONS, REVOKE_WINDOW_SECONDS,
+  EMOJI_ONLY_MAX } = require("./wa_read");
 const { startBridgeApi } = require("./bridge_api");
+const { MessageMedia } = require("whatsapp-web.js");
 
 const chat = (over = {}) => ({
   id: { _serialized: "254712345678@c.us" },
@@ -125,6 +127,9 @@ test("nothing to show is not an error", () => {
 // ---- media: what the dashboard needs in order to show it ----
 
 const msg = (over = {}) => ({ id: { _serialized: "A" }, timestamp: 1, ...over });
+// A real message id, for the places where the point is that the dashboard can
+// take it away and ask for something with it.
+const MSG_IN_THREAD = "false_254712345678@c.us_3EB0C767D097F5A2C7C1";
 
 test("a photo says how to render it as well as what to call it", () => {
   const [m] = shapeMessages([msg({ hasMedia: true, type: "image" })]);
@@ -137,6 +142,31 @@ test("a sticker is rendered as a sticker, not as a photo", () => {
   // Same element, smaller and without a frame: a sticker in a photo's box
   // reads as a tiny broken picture.
   assert.strictEqual(shapeMessages([msg({ hasMedia: true, type: "sticker" })])[0].render_as, "sticker");
+});
+
+test("a sticker carries everything the pane needs to go and fetch the picture", () => {
+  // A sticker travels the road a photo travels: the pane asks /media for this
+  // chat and this message id, and puts the bytes in an <img>. None of it
+  // comes down with the thread, so the id is the whole of what makes the
+  // picture reachable — without one there is a bubble saying "Sticker" and no
+  // way to show what was actually sent.
+  const [m] = shapeMessages([msg({ id: { _serialized: MSG_IN_THREAD },
+                                   hasMedia: true, type: "sticker", body: "" })]);
+  assert.strictEqual(m.id, MSG_IN_THREAD);
+  assert.strictEqual(m.has_media, true);
+  assert.strictEqual(m.render_as, "sticker", "which element to draw it in");
+  assert.strictEqual(m.media_type, "sticker", "WhatsApp's own word for what it is");
+  assert.strictEqual(m.kind, "Sticker", "what to call it when the picture cannot be shown");
+  assert.strictEqual(m.body, "", "a sticker says nothing in words");
+  assert.strictEqual(m.emoji_only, false, "a sticker is a picture, not an emoji");
+});
+
+test("a sticker is what the chat list says was said last", () => {
+  // It carries no words, so without a label the newest thing in the
+  // conversation is a blank line in the list.
+  const [c] = shapeChats([chat({ lastMessage: { body: "", type: "sticker",
+                                                hasMedia: true, fromMe: true, timestamp: 1300 } })]);
+  assert.strictEqual(c.preview, "Sticker");
 });
 
 test("a voice note and a plain audio file both play", () => {
@@ -467,6 +497,24 @@ test("a quoted photo with no caption is named rather than left blank", () => {
   assert.deepStrictEqual([captioned.kind, captioned.preview], ["Photo", "at the shop"]);
 });
 
+test("a sticker that has been replied to fills the quote block instead of emptying it", () => {
+  // A sticker has no caption and no body, so the label is the whole of what
+  // the quote block has to show — and an unlabelled quote is a bubble
+  // pointing at nothing, which is how answering somebody's sticker used to
+  // read.
+  const sticker = quoteOf({ type: "sticker", directPath: "/v/t62.7161" });
+  assert.deepStrictEqual([sticker.kind, sticker.preview], ["Sticker", ""]);
+  // And it says so whether or not WhatsApp sent a path to the file beside the
+  // quote: the two arrive at the label down different branches.
+  assert.strictEqual(quoteOf({ type: "sticker" }).kind, "Sticker");
+  // The id is there to find the message in a thread the pane has already
+  // loaded — that message is the one that can be asked for the picture, since
+  // the quote itself usually arrives without an id of its own.
+  const named = quoteOf({ type: "sticker", directPath: "/v/x" },
+                        { quotedStanzaID: "3EB0C767D097F5A2C7C1" });
+  assert.strictEqual(named.stanza_id, "3EB0C767D097F5A2C7C1");
+});
+
 test("a quoted message that carries no file is labelled all the same", () => {
   // These have no directPath, so there is nothing to call media about them,
   // and they used to arrive as an empty quote.
@@ -667,6 +715,99 @@ test("the pin durations are WhatsApp's own three and nothing between them", () =
 });
 
 
+// ---- a message that is nothing but emoji ----
+//
+// WhatsApp draws a short all-emoji message larger than text, and the page can
+// only follow that if the shaped message says which messages they are.
+
+test("a message of one, two or three emoji is flagged, and a fourth is too many", () => {
+  const flagged = (body) => shapeMessages([message({ body })])[0].emoji_only;
+  for (const body of [
+    "\u{1F44D}",                                    // one
+    "\u{1F602}\u{1F602}",                           // two of the same
+    "\u{1F389}\u{1F38A}\u{1F973}",                  // three different
+    "\u{1F44D}\u{1F3FD}",                           // one, with a skin tone
+    "\u{1F468}‍\u{1F469}‍\u{1F467}",      // a family: seven code points, one emoji
+    "\u{1F1F0}\u{1F1EA}",                           // a flag: two regional indicators, one emoji
+    "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",   // a subdivision flag
+    "1️⃣",                                // a keycap
+    " \u{1F44D} \u{1F44D} ",                        // two and some spacing
+  ]) assert.strictEqual(flagged(body), true, JSON.stringify(body));
+
+  for (const body of [
+    "\u{1F44D}\u{1F44D}\u{1F44D}\u{1F44D}",         // four is a message written in emoji
+    "ok \u{1F44D}", "\u{1F44D} thanks", "niaje", "", "   ", "123", "\u{1F44D}x",
+    "haha \u{1F602}\u{1F602}\u{1F602}",
+  ]) assert.strictEqual(flagged(body), false, JSON.stringify(body));
+});
+
+test("counting emoji by code point would get the common ones wrong", () => {
+  // Why Intl.Segmenter and not Array.from: a family is seven code points and
+  // one emoji, a flag is two and one. Counted the cheap way, a message of a
+  // single family emoji is four emoji too many and is laid out as text.
+  const family = "\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}";
+  assert.ok(Array.from(family).length > EMOJI_ONLY_MAX);
+  assert.strictEqual(isEmojiOnly(family), true);
+  assert.strictEqual(isEmojiOnly(family.repeat(EMOJI_ONLY_MAX)), true);
+  assert.strictEqual(isEmojiOnly(family.repeat(EMOJI_ONLY_MAX + 1)), false);
+});
+
+test("a caption is a caption whatever it says, and a poll is still a poll", () => {
+  // The flag is about a message made of emoji, not about a photo that happens
+  // to have been sent with one under it, nor a poll whose question is one.
+  const [photo] = shapeMessages([msg({ hasMedia: true, type: "image", body: "\u{1F44D}" })]);
+  assert.strictEqual(photo.emoji_only, false);
+  assert.strictEqual(photo.body, "\u{1F44D}", "the caption itself still comes through");
+  assert.strictEqual(
+    shapeMessages([msg({ type: "poll_creation", body: "\u{1F37D}\u{1F35B}" })])[0].emoji_only,
+    false);
+});
+
+test("nothing that is not a string is read as emoji", () => {
+  for (const junk of [null, undefined, 0, 1, {}, [], true]) {
+    assert.strictEqual(isEmojiOnly(junk), false, JSON.stringify(junk));
+  }
+});
+
+
+// ---- cutting text without cutting through a character ----
+
+test("a preview is cut between characters, never through one", () => {
+  // JavaScript slices by UTF-16 code unit, so a cut at a fixed offset lands
+  // inside an emoji about half the time and leaves one half of a surrogate
+  // pair behind. That is not text: it survives as far as the JSON on the wire
+  // and arrives on the page as a replacement glyph, on a message that reads
+  // perfectly well on the phone.
+  const family = "\u{1F468}‍\u{1F469}‍\u{1F467}";
+  const halfSurrogate = /[\uD800-\uDFFF]/;
+  for (let padding = 80; padding <= 95; padding++) {
+    const body = `${"a".repeat(padding)}${family} ${family}`;
+    const [c] = shapeChats([chat({ lastMessage: { body, type: "chat", hasMedia: false,
+                                                  fromMe: false, timestamp: 1300 } })]);
+    const where = `padding=${padding} preview=${JSON.stringify(c.preview)}`;
+    assert.ok(c.preview.length <= 90, where);
+    // Every surrogate still has its other half.
+    assert.ok(!halfSurrogate.test(c.preview.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "")), where);
+    // The surest test of all: text that survives being written out as UTF-8
+    // and read back is text. A lone surrogate comes back as U+FFFD.
+    assert.strictEqual(Buffer.from(c.preview, "utf8").toString("utf8"), c.preview, where);
+    // A family emoji is built out of zero-width joiners, and a cut on either
+    // side of one leaves a joiner holding nothing.
+    assert.ok(!/‍…$/.test(c.preview), where);
+  }
+});
+
+test("a message body is cut the same way, and a short one is not cut at all", () => {
+  const long = "\u{1F602}".repeat(3000);    // 3000 emoji, 6000 code units
+  const [m] = shapeMessages([message({ body: long })]);
+  assert.ok(m.body.length <= 4000 && m.body.endsWith("…"));
+  assert.strictEqual(Buffer.from(m.body, "utf8").toString("utf8"), m.body);
+  assert.ok(/^\u{1F602}+…$/u.test(m.body), "every emoji in it is whole");
+  const whole = "\u{1F602} tulia \u{1F602}";
+  assert.strictEqual(shapeMessages([message({ body: whole })])[0].body, whole);
+});
+
+
 // ---- the routes the menu calls ----
 //
 // Driven against the real server, because what wants testing here is the
@@ -704,15 +845,36 @@ let currentMessage = stubMessage();
 let knownChats = new Set([CHAT]);
 let pinAnswer = true;
 
+// What WhatsApp hands back for a message that has just been sent.
+const SENT_ID = `true_${CHAT}_3EB0FF11AA22`;
+
 const stubClient = {
   info: { wid: { _serialized: "254733000222@c.us" } },
   getMessageById: async () => currentMessage,
   getChatById: async (id) => (knownChats.has(id) ? { id: { _serialized: id } } : null),
+  // Recorded in the detail the library actually depends on: it decides what to
+  // do with the content by its class, and reads the sticker option off the
+  // options object.
+  sendMessage: async (chatId, content, options = {}) => {
+    calls.push(["sendMessage", chatId, content instanceof MessageMedia, content.mimetype,
+                Buffer.from(content.data || "", "base64").length,
+                options.sendMediaAsSticker === true]);
+    return { id: { _serialized: SENT_ID } };
+  },
+};
+
+// Stands in for the account-wide SendQueue that lives in index.js. Nothing in
+// production passes one yet — see the note on startBridgeApi — so this is also
+// the only place the seam is exercised.
+let queueCap = "";
+const stubQueue = {
+  overCap: () => queueCap,
+  record: () => { calls.push(["queue.record"]); },
 };
 
 process.env.BRIDGE_API_TOKEN = TOKEN;
 process.env.BRIDGE_API_PORT = "0";   // let the operating system pick one
-const server = startBridgeApi(stubClient, { linked: true, qr: null });
+const server = startBridgeApi(stubClient, { linked: true, qr: null }, { queue: stubQueue });
 const listening = new Promise((resolve) => {
   if (server.listening) return resolve();
   server.once("listening", resolve);
@@ -739,6 +901,7 @@ function fresh(over = {}) {
   calls = [];
   knownChats = new Set([CHAT]);
   pinAnswer = true;
+  queueCap = "";
   currentMessage = stubMessage(over);
 }
 
@@ -969,4 +1132,215 @@ test("in a group, somebody else's recent message is still attempted", async () =
                                               scope: "everyone" });
   assert.deepStrictEqual([res.code, res.body], [200, { status: "deleted for everyone" }]);
   assert.deepStrictEqual(calls, [["delete", true]]);
+});
+
+
+// ---- /send-sticker ----
+//
+// Real WebP files, small enough to read: a solid 512x512 is 52 bytes once
+// WebP has had it, and a two-frame animation of the same is 140. What the
+// route reads is the container's own header, and the reader was checked
+// against lossy, lossless, alpha and animated output from both Pillow and
+// cwebp before these were written down.
+const STICKER_512 =
+  "UklGRiwAAABXRUJQVlA4TCAAAAAv/8F/AAcQ/Y/+BwQCyf7eMxTR/4z//Oc///nPf/7zfw==";
+// VP8X with the animation flag set: this is what an animated sticker is.
+const ANIMATED_512 =
+  "UklGRoQAAABXRUJQVlA4WAoAAAACAAAA/wEA/wEAQU5JTQYAAAAAAAAAAABBTk1GKAAAAAAAAAAAAP8"
+  + "BAP8BAHgAAAJWUDhMDwAAAC//wX8ABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAP8BAP8BAHgAAABWU"
+  + "DhMDwAAAC//wX8ABxDR//4HIqL/AQA=";
+// The same picture at 1024x1024 — a real file, and too big for a sticker.
+const STICKER_1024 =
+  "UklGRk4AAABXRUJQVlA4TEIAAAAv/8P/AAcQ/Y/+BwQCyf7mExTR/4z//Oc///nPf/7zn//85z//+c9"
+  + "//vOf//znP//5z3/+85///Oc///nPf/7zfwM=";
+// A PNG, by its first eight bytes, which is as much of one as this looks at.
+const PNG = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"),
+                           Buffer.alloc(40, 0x20)]).toString("base64");
+
+const sticker = (over = {}) => ({ chat_id: CHAT, mimetype: "image/webp",
+                                  data: STICKER_512, ...over });
+
+test("a sticker goes out as a sticker, and says which message it became", async () => {
+  fresh();
+  const res = await post("/send-sticker", sticker());
+  assert.deepStrictEqual([res.code, res.body], [200, { status: "sent", msg_id: SENT_ID }]);
+  // sendMediaAsSticker is the whole difference between this and sending the
+  // same picture as a photo, and the library reads it off the options object
+  // and the content off its class.
+  assert.deepStrictEqual(calls, [
+    ["sendMessage", CHAT, true, "image/webp", 52, true],
+    ["queue.record"],
+  ]);
+});
+
+test("an animated sticker is sent as it arrived, because nothing here can redraw it", async () => {
+  // An animated WebP is passed through untouched by the library, frames and
+  // all; what would flatten it is being re-encoded, and that only happens to
+  // a PNG or a JPEG.
+  fresh();
+  const res = await post("/send-sticker", sticker({ data: ANIMATED_512 }));
+  assert.strictEqual(res.code, 200);
+  assert.deepStrictEqual(calls[0], ["sendMessage", CHAT, true, "image/webp", 140, true]);
+});
+
+test("a PNG is accepted, because WhatsApp's own code turns that into a sticker", async () => {
+  fresh();
+  const res = await post("/send-sticker", sticker({ mimetype: "image/png", data: PNG }));
+  assert.strictEqual(res.code, 200);
+  assert.deepStrictEqual(calls[0], ["sendMessage", CHAT, true, "image/png", 48, true]);
+});
+
+test("sending a sticker needs the shared token", async () => {
+  fresh();
+  const res = await post("/send-sticker", sticker(), { token: "wrong" });
+  assert.strictEqual(res.code, 401);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a sticker is only ever sent to one person, never to a group", async () => {
+  // The same rule /send-reply keeps, and for the same reason: the dashboard
+  // promises it does not send into groups.
+  for (const chatId of ["120363000000000001@g.us", "254776599915-1497087597@g.us",
+                        "status@broadcast", "", "not-a-chat", "254712345678"]) {
+    fresh();
+    knownChats.add(chatId);
+    const res = await post("/send-sticker", sticker({ chat_id: chatId }));
+    assert.deepStrictEqual([res.code, res.body], [400, { error: "bad chat id" }], chatId);
+    assert.deepStrictEqual(calls, [], chatId);
+  }
+});
+
+test("a video or a GIF is refused in words, because there is nothing here to convert it", async () => {
+  // whatsapp-web.js converts a video to a sticker with ffmpeg, and there is
+  // no ffmpeg in this image. Attempting it would throw from inside the
+  // library and arrive as a 500 full of page internals.
+  for (const mimetype of ["video/mp4", "video/webm", "image/gif"]) {
+    fresh();
+    const res = await post("/send-sticker", sticker({ mimetype }));
+    assert.strictEqual(res.code, 400, mimetype);
+    assert.match(res.body.error, /animated WebP/, mimetype);
+    assert.deepStrictEqual(calls, [], mimetype);
+  }
+});
+
+test("anything that is not a picture a sticker can be made of is refused", async () => {
+  for (const mimetype of ["application/pdf", "text/plain", "audio/ogg", "image/tiff",
+                          "image/svg+xml", ""]) {
+    fresh();
+    const res = await post("/send-sticker", sticker({ mimetype }));
+    assert.deepStrictEqual([res.code, res.body],
+                           [400, { error: "a sticker has to be a WebP, PNG or JPEG picture" }],
+                           mimetype);
+    assert.deepStrictEqual(calls, [], mimetype);
+  }
+});
+
+test("a file that is not the kind it says it is never reaches WhatsApp", async () => {
+  // The mimetype is what decides the treatment — the page uploads the bytes
+  // as a sticker on the strength of it — so a PNG announced as a WebP is a
+  // sticker that lands on everybody's phone as a grey box.
+  fresh();
+  let res = await post("/send-sticker", sticker({ data: PNG }));
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "that file is not really a WEBP" }]);
+  assert.deepStrictEqual(calls, []);
+
+  fresh();
+  res = await post("/send-sticker", sticker({ mimetype: "image/png", data: STICKER_512 }));
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "that file is not really a PNG" }]);
+
+  fresh();
+  res = await post("/send-sticker", sticker({ mimetype: "image/jpeg", data: STICKER_512 }));
+  assert.deepStrictEqual([res.code, res.body], [400, { error: "that file is not really a JPEG" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a WebP bigger than a sticker is refused, and told how big it was", async () => {
+  // This is the one kind nothing resizes on the way out: WhatsApp would store
+  // it as a sticker that size and every client would then draw it that size.
+  // The same picture as a PNG comes out right, which is what the refusal
+  // says to do.
+  fresh();
+  const res = await post("/send-sticker", sticker({ data: STICKER_1024 }));
+  assert.strictEqual(res.code, 400);
+  assert.match(res.body.error, /512x512 or smaller, and that one is 1024x1024/);
+  assert.match(res.body.error, /as a PNG/);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a WebP whose header says nothing is refused rather than guessed at", async () => {
+  // RIFF and WEBP in the right places, and then a chunk nobody can measure.
+  const unreadable = Buffer.concat([
+    Buffer.from("RIFF"), Buffer.alloc(4, 0x20), Buffer.from("WEBP"),
+    Buffer.from("XXXX"), Buffer.alloc(16, 0x20),
+  ]).toString("base64");
+  fresh();
+  const res = await post("/send-sticker", sticker({ data: unreadable }));
+  assert.deepStrictEqual([res.code, res.body],
+                         [400, { error: "that WebP's header could not be read" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a sticker that is not base64 is refused before anything decodes it", async () => {
+  // Node's own base64 reader skips what it does not recognise, so a data: URL
+  // prefix or a truncated upload would otherwise arrive as a short picture
+  // rather than as an error.
+  // A truncated upload that happens to stop on a four-character boundary is
+  // not distinguishable from a short file here, and is caught by the header
+  // reader instead — which is the test above.
+  for (const data of [`data:image/webp;base64,${STICKER_512}`, "not base64!!",
+                      STICKER_512.slice(0, 21), "", "   ", `${STICKER_512}\n`]) {
+    fresh();
+    const res = await post("/send-sticker", sticker({ data }));
+    assert.deepStrictEqual([res.code, res.body],
+                           [400, { error: "the sticker did not arrive as base64" }],
+                           JSON.stringify(data.slice(0, 24)));
+    assert.deepStrictEqual(calls, []);
+  }
+});
+
+test("a sticker too heavy to be one is refused with its ceiling named", async () => {
+  // 500 KB is WhatsApp's own published limit for an animated sticker, and the
+  // larger of its two.
+  fresh();
+  const tooBig = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4, 0x20),
+                                Buffer.from("WEBP"), Buffer.alloc(600 * 1024, 0x20)]);
+  const res = await post("/send-sticker", sticker({ data: tooBig.toString("base64") }));
+  assert.deepStrictEqual([res.code, res.body],
+                         [413, { error: "a sticker has to be smaller than 500 KB" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a request too large to read at all is answered, not dropped", async () => {
+  // The body used to be cut off by destroying the connection, which reaches
+  // the backend as "the bridge is unreachable" — a different thing from "that
+  // was too big", and it sends the owner looking at the wrong half of the
+  // system.
+  fresh();
+  const res = await post("/send-sticker", sticker({ data: "A".repeat(1_200_000) }));
+  assert.deepStrictEqual([res.code, res.body],
+                         [413, { error: "a sticker has to be smaller than 500 KB" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("a conversation that is not there is a 404, and nothing is sent", async () => {
+  fresh();
+  knownChats = new Set();
+  const res = await post("/send-sticker", sticker());
+  assert.deepStrictEqual([res.code, res.body], [404, { error: "no such chat" }]);
+  assert.deepStrictEqual(calls, []);
+});
+
+test("the account's own pace is the last word before a sticker goes out", async () => {
+  // Tapping is fast and a burst of stickers is exactly what an automated
+  // account looks like from WhatsApp's side. The queue lives in index.js and
+  // is passed in; this is the seam, and the only thing in this file that
+  // exercises it.
+  for (const window of ["minute", "hour", "day"]) {
+    fresh();
+    queueCap = window;
+    const res = await post("/send-sticker", sticker());
+    assert.strictEqual(res.code, 429, window);
+    assert.match(res.body.error, new RegExp(`in a ${window}`), window);
+    assert.deepStrictEqual(calls, [], window);
+  }
 });

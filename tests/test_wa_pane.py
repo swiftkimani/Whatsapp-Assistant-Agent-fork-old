@@ -40,7 +40,8 @@ def bridge(monkeypatch):
 
 
 PROTECTED = [("get", "/api/wa/chats"), ("get", "/api/wa/thread?chat_id=1@c.us"),
-             ("post", "/api/wa/reply"), ("get", "/api/wa/stream")]
+             ("post", "/api/wa/reply"), ("post", "/api/wa/send-sticker"),
+             ("get", "/api/wa/stream")]
 
 
 @pytest.mark.parametrize("method,path", PROTECTED)
@@ -97,6 +98,25 @@ def test_a_reply_the_assistant_sent_is_named_as_hers(signed_in, bridge):
     db.log_message(chat_id, "Jane", "out", "Niko poa, na wewe?", "auto")
     messages = signed_in.get("/api/wa/thread", params={"chat_id": chat_id}).json()["messages"]
     assert [m["sent_by"] for m in messages] == ["", "auto", ""]
+
+
+def test_a_sticker_and_an_emoji_message_reach_the_page_as_the_bridge_shaped_them(signed_in, bridge):
+    """The pane adds `sent_by` to every message and passes the rest straight
+    through. Both of these carry a field the page needs and nothing else
+    carries: a sticker has no words, so `render_as` is the only thing that
+    turns it into a picture rather than the word "Sticker"; and `emoji_only`
+    is what lets a one-emoji reply be drawn large, the way the phone draws it.
+    """
+    bridge.replies["/thread"] = (200, {"chat": THREAD["chat"], "messages": [
+        {"id": "S", "ts": 1762000001, "from_me": False, "author": "", "body": "",
+         "kind": "Sticker", "has_media": True, "media_type": "sticker",
+         "render_as": "sticker", "emoji_only": False},
+        {"id": "E", "ts": 1762000002, "from_me": True, "author": "", "body": "\U0001f44d",
+         "kind": "", "has_media": False, "emoji_only": True},
+    ]})
+    messages = signed_in.get("/api/wa/thread", params={"chat_id": "254712345678@c.us"}).json()["messages"]
+    assert [m["render_as"] for m in messages[:1]] == ["sticker"]
+    assert [m["emoji_only"] for m in messages] == [False, True]
 
 
 @pytest.mark.parametrize("chat_id", ["", "not-an-id", "254712345678", "254712345678@c.us; rm -rf /",

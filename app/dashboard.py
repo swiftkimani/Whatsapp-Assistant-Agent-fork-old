@@ -744,21 +744,24 @@ class DeleteRequest(MessageAction):
     scope: Literal["me", "everyone"]
 
 
-async def _message_action(path: str, payload: dict) -> dict:
+async def _message_action(path: str, payload: dict, timeout: float = 30) -> dict:
     """Pass one of WhatsApp's own message actions through to the bridge.
 
     The bridge answers 400/404/409 with a sentence meant to be read — "too
-    late to delete this for everyone", "WhatsApp would not pin this message" —
-    so those come back as they are rather than being flattened into a 502. A
-    person deciding what to do next needs WhatsApp's reason, not ours.
+    late to delete this for everyone", "WhatsApp would not pin this message",
+    "a sticker is 512x512 or smaller" — so those come back as they are rather
+    than being flattened into a 502. A person deciding what to do next needs
+    WhatsApp's reason, not ours. 413 and 429 are here for the same reason:
+    they are what the bridge says about something too big to send and about
+    this account having said enough for now.
     """
-    r = await _bridge_post(path, payload, timeout=30)
+    r = await _bridge_post(path, payload, timeout=timeout)
     if r.status_code == 200:
         return r.json()
     reason = ""
     if r.headers.get("content-type", "").startswith("application/json"):
         reason = ((r.json() or {}).get("error") or "")
-    if r.status_code in (400, 404, 409) and reason:
+    if r.status_code in (400, 404, 409, 413, 429) and reason:
         raise HTTPException(r.status_code, reason)
     raise HTTPException(502, f"The bridge could not do that ({r.status_code}): {r.text[:120]}")
 
@@ -824,6 +827,63 @@ async def wa_reply(body: ReplyRequest):
     db.log_message(body.chat_id, contacts_store.name_for(body.chat_id), "out", body.text, "dashboard")
     log_event("dashboard_reply")   # no text, name or number
     return {"status": "sent"}
+
+
+# What a sticker may be, and how much of one may cross the wire. The bridge is
+# the authority on both — it is the side that knows what whatsapp-web.js will
+# do with the bytes, and it refuses a file that is not what it claims, or too
+# large, or too big on the canvas, in a sentence meant to be read. These bounds
+# only keep an unreasonable request off the wire; the mimetype itself is passed
+# through unexamined so that the bridge's own answer about it is what the owner
+# sees, rather than a validation error about a field.
+MAX_STICKER_BYTES = 500 * 1024                         # the bridge's own ceiling
+MAX_STICKER_BASE64 = -(-MAX_STICKER_BYTES // 3) * 4    # four characters per three bytes
+STICKER_COOLDOWN = 3    # seconds between stickers: tapping is fast, and WhatsApp is watching
+
+
+class StickerRequest(BaseModel):
+    # A group is refused in the handler rather than by this pattern, so the
+    # pane has a sentence to show instead of a field error.
+    chat_id: str = Field(pattern=ANY_CHAT_ID)
+    mimetype: str = Field(min_length=6, max_length=60, pattern=r"^[a-z]+/[a-z0-9.+-]+$")
+    # Base64 and nothing else: no "data:image/webp;base64," in front of it.
+    # The bridge checks the alphabet strictly, because Node's own decoder
+    # silently skips what it does not recognise and would read that prefix as
+    # part of the picture.
+    data: str = Field(min_length=16, max_length=MAX_STICKER_BASE64)
+
+
+@router.post("/api/wa/send-sticker", dependencies=[Depends(require_auth)])
+async def wa_send_sticker(body: StickerRequest):
+    """Send a sticker as yourself, into a conversation that already exists.
+
+    Same ground as /api/wa/reply: the chat id comes from the browser, so the
+    bridge checks it against WhatsApp itself and refuses a group, and the
+    dashboard password is what stands between a stranger and your WhatsApp.
+
+    Nothing is written to the message log. There is no text to write, and
+    "[sticker]" standing in for one would end up in what the assistant reads
+    back as examples of how its owner writes.
+    """
+    if body.chat_id.endswith("@g.us"):
+        raise HTTPException(400, "Stickers go to one person. The dashboard never sends to a group.")
+    if time.time() - _last_send.get("sticker", 0.0) < STICKER_COOLDOWN:
+        raise HTTPException(429, "Just sent one. Wait a moment.")
+
+    # Longer than a text send: a sticker that is not already a WebP is
+    # converted inside the bridge's own browser page before it goes anywhere.
+    try:
+        data = await _message_action("/send-sticker", body.model_dump(), timeout=60)
+    except HTTPException as refused:
+        # Every other refusal the bridge makes is already a sentence. This one
+        # is not — it answers "no such chat" — and it is the only 404 this
+        # route has.
+        if refused.status_code == 404:
+            raise HTTPException(404, "That conversation is not on WhatsApp any more.")
+        raise
+    _last_send["sticker"] = time.time()
+    log_event("dashboard_sticker", kind=body.mimetype)   # no picture, name or number
+    return {"status": "sent", "msg_id": data.get("msg_id", "")}
 
 
 @router.post("/api/transcribe", dependencies=[Depends(require_auth)])

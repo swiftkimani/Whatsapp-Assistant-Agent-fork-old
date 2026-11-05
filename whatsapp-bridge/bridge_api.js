@@ -5,7 +5,7 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { Location } = require("whatsapp-web.js");
+const { Location, MessageMedia } = require("whatsapp-web.js");
 const { mergeContacts, DEFAULT_LIMIT } = require("./contacts_sync");
 const { shapeChats, shapeMessages, CHAT_ID, MESSAGE_ID, DEFAULT_CHATS,
   DEFAULT_MESSAGES, isReactionEmoji, canDeleteForEveryone, inGroup,
@@ -16,8 +16,9 @@ const { qrToSvg } = require("./qr_svg");
 // can share one copy when they run as separate containers.
 const CONTACTS_FILE = process.env.CONTACTS_FILE
   || path.resolve(__dirname, "..", "contacts.json");
-const ROUTES = ["/send-text", "/send-location", "/send-reply", "/sync-contacts",
-  "/chats", "/thread", "/send-self", "/media", "/avatar", "/link-status",
+const ROUTES = ["/send-text", "/send-location", "/send-reply", "/send-sticker",
+  "/sync-contacts", "/chats", "/thread", "/send-self", "/media", "/avatar",
+  "/link-status",
   // WhatsApp's own message menu, the half of it that has to happen on this
   // side. Reply is "/send-reply" and already above; Copy never leaves the
   // browser; Report is a moderation action this assistant does not take.
@@ -30,6 +31,91 @@ const NEEDS_LINK = ROUTES.filter((r) => r !== "/link-status");
 // A photo or a video can be large, and the whole thing is base64 in one JSON
 // reply. Past this it is not worth holding in memory on either side.
 const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
+
+// ---- sending a sticker ----
+//
+// What whatsapp-web.js 1.34.7 actually does with one, read out of
+// node_modules rather than remembered. Client.sendMessage puts a MessageMedia
+// through Util.formatToWebpSticker when sendMediaAsSticker is set, and that:
+//   - hands an image/webp straight back, bytes and dimensions untouched;
+//   - converts any other image/* inside the browser page, through WhatsApp's
+//     own WAWebImageUtils.toWebpSticker — which is what makes it 512x512;
+//   - converts a video/* with ffmpeg, through fluent-ffmpeg;
+//   - throws "Invalid media format" for anything that is neither.
+// There is no ffmpeg in this image (see whatsapp-bridge/Dockerfile) and the
+// library bundles none, so the video road is refused on the way in rather
+// than left to throw halfway through a send. An animated sticker is an
+// animated WebP already, everywhere one comes from.
+const STICKER_TYPES = new Set(["image/webp", "image/png", "image/jpeg"]);
+
+// What a sticker may weigh. WhatsApp's own published sticker limits are
+// 100 KB for a static sticker and 500 KB for an animated one; the larger of
+// the two is kept as the single ceiling, since a WebP goes out unchanged and
+// a PNG is re-encoded by WhatsApp's own code before it goes anywhere, and
+// neither has any business being bigger than this.
+const MAX_STICKER_BYTES = 500 * 1024;
+// WhatsApp's sticker canvas. Only checked for a WebP, which is the one kind
+// nothing resizes on the way out.
+const MAX_STICKER_SIDE = 512;
+
+// How much JSON a route may send. Everything here is a line or two, except a
+// sticker, which carries a picture in base64 — four bytes of request for
+// every three of file — and needs a ceiling of its own.
+const MAX_BODY_BYTES = 20000;
+const MAX_STICKER_BODY_BYTES = Math.ceil(MAX_STICKER_BYTES / 3) * 4 + MAX_BODY_BYTES;
+
+// The first bytes of each kind this accepts, so a file has to be what it says
+// it is. The mimetype is what decides the treatment — the page's
+// processStickerData uploads the bytes as a sticker on the strength of it —
+// so a PNG announced as a WebP is a sticker that reaches everybody's phone as
+// a grey box, with nothing anywhere saying why.
+const STICKER_MAGIC = {
+  "image/webp": (b) => b.length > 12 && b.toString("latin1", 0, 4) === "RIFF"
+    && b.toString("latin1", 8, 12) === "WEBP",
+  "image/png": (b) => b.length > 8 && b.toString("latin1", 0, 8) === "\x89PNG\r\n\x1a\n",
+  "image/jpeg": (b) => b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF,
+};
+
+/**
+ * The canvas size a WebP declares, or null when its header does not say.
+ *
+ * Read because an image/webp is the one thing here that goes out exactly as
+ * it arrived: nothing resizes it, so a 2000-pixel photo renamed as a sticker
+ * is stored by WhatsApp as a sticker that size, and every client it reaches
+ * then draws it in a sticker's place. Refusing it is the honest answer; the
+ * same picture sent as a PNG comes out right, because WhatsApp sizes that
+ * one itself.
+ *
+ * All three of the shapes a WebP file comes in, read out of the container's
+ * own header and never out of the image data. Two of the three store each
+ * side one less than it is and have the one added back; the lossy keyframe
+ * states its size outright. Checked against real files from both Pillow and
+ * cwebp — lossy, lossless, lossless with alpha, lossy with alpha, and
+ * animated — rather than from the specification alone.
+ */
+function webpSize(bytes) {
+  const chunk = bytes.length >= 16 ? bytes.toString("latin1", 12, 16) : "";
+  // Extended: an alpha channel, metadata, or animation. Every animated
+  // sticker is one of these. 24 bits per side, little-endian.
+  if (chunk === "VP8X" && bytes.length >= 30) {
+    return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+  }
+  // Simple lossy: a three-byte frame tag, a three-byte sync code, then 14
+  // bits per side. Without the sync code this is not a keyframe to measure.
+  if (chunk === "VP8 " && bytes.length >= 30) {
+    if (bytes[23] !== 0x9D || bytes[24] !== 0x01 || bytes[25] !== 0x2A) return null;
+    return { width: bytes.readUInt16LE(26) & 0x3FFF, height: bytes.readUInt16LE(28) & 0x3FFF };
+  }
+  // Simple lossless: a signature byte, then 14 bits per side packed into the
+  // four that follow.
+  if (chunk === "VP8L" && bytes.length >= 25) {
+    if (bytes[20] !== 0x2F) return null;
+    const packed = bytes.readUInt32LE(21);
+    return { width: (packed & 0x3FFF) + 1, height: ((packed >>> 14) & 0x3FFF) + 1 };
+  }
+  return null;
+}
+
 let started = false; // "ready" can fire again after a reconnect
 
 // The digits an id names, with neither the "@c.us" namespace nor the ":12" a
@@ -70,8 +156,21 @@ function findEntry(name) {
  * @param {object} client the WhatsApp client
  * @param {{linked: boolean, qr: string|null}} link live link state, owned by
  *        index.js and read on every request so the answer is never stale
+ * @param {object} [opts]
+ * @param {{overCap: () => string, record: () => void}} [opts.queue] the
+ *        account-wide send pacer from send_queue.js.
+ *
+ *        Nothing on this API is paced without it: the SendQueue instance
+ *        lives in index.js and covers the agent's own replies, so every send
+ *        that starts here — a dashboard reply, a forward, a sticker — spends
+ *        none of the account's budget and is spaced by nothing but how fast
+ *        the owner taps. Passed in, it is consulted before a sticker goes
+ *        out and told about it afterwards, which is the one new send this
+ *        file adds and the one that is cheapest to repeat. One line in
+ *        index.js — startBridgeApi(client, link, { queue: sendQueue }) —
+ *        turns it on.
  */
-function startBridgeApi(client, link) {
+function startBridgeApi(client, link, { queue = null } = {}) {
   // The owner's own id, so a group they are no longer in can be told apart
   // from one they are still in, and a removal can read as "you were removed"
   // rather than "someone was". Absent until the client is linked, and an
@@ -169,13 +268,33 @@ function startBridgeApi(client, link) {
       return reply(503, { error: "not linked" });
     }
 
+    const bodyLimit = req.url === "/send-sticker" ? MAX_STICKER_BODY_BYTES : MAX_BODY_BYTES;
     let body = "";
+    let oversized = false;
     req.on("data", (chunk) => {
+      // Kept reading and thrown away rather than destroying the connection:
+      // a dropped socket reaches the backend as "the bridge is unreachable",
+      // which is a different thing from "that was too big" and sends the
+      // owner looking at the wrong half of the system. Nothing is held past
+      // the limit, so a caller who keeps sending is only spending their own
+      // bandwidth on the loopback.
+      if (oversized) return;
       body += chunk;
-      if (body.length > 20000) req.destroy();
+      if (body.length > bodyLimit) {
+        oversized = true;
+        body = "";
+      }
     });
     req.on("end", async () => {
       try {
+        if (oversized) {
+          console.log(`[send] refused reason=body_too_large route=${req.url}`);
+          return reply(413, {
+            error: req.url === "/send-sticker"
+              ? `a sticker has to be smaller than ${Math.round(MAX_STICKER_BYTES / 1024)} KB`
+              : "that request is too large",
+          });
+        }
         const data = body ? JSON.parse(body) : {};   // /sync-contacts needs no body
 
         // ---- reading the owner's own chats, for the dashboard's WhatsApp pane ----
@@ -362,6 +481,103 @@ function startBridgeApi(client, link) {
           // record of this reply to the message now in the thread. Empty if
           // WhatsApp returned no message for it, which the caller has to
           // allow for — there is nothing here that could invent one.
+          return reply(200, {
+            status: "sent",
+            msg_id: (sent && sent.id && (sent.id._serialized || sent.id.$1)) || "",
+          });
+        }
+
+        // ---- a sticker, into a conversation that already exists ----
+        //
+        // Stickers are half of what gets said on WhatsApp, and the pane could
+        // neither send one nor answer one with one. The ground rules are
+        // /send-reply's, for the same reasons: the conversation has to exist
+        // already, groups are refused, and nothing here is taken on trust
+        // because the bytes end up in the browser page.
+        //
+        // Every check that can be made from the request alone is made before
+        // the chat is looked up, so a sticker WhatsApp would mangle costs no
+        // round trip and, more to the point, is never half-sent: the
+        // conversion the library does happens before anything reaches
+        // WhatsApp, and a throw from inside it would arrive here as page
+        // internals wrapped in a 500.
+        if (req.url === "/send-sticker") {
+          const chatId = String(data.chat_id || "");
+          const mimetype = String(data.mimetype || "").split(";")[0].trim().toLowerCase();
+          const encoded = String(data.data || "");
+
+          // No hyphen in the pattern, exactly as in /send-reply: that is what
+          // keeps groups out, which the dashboard promises.
+          if (!/^\d[\d:]*@(c\.us|lid)$/.test(chatId)) return reply(400, { error: "bad chat id" });
+
+          if (/^video\//.test(mimetype) || mimetype === "image/gif") {
+            // The library's only road from a moving picture to a sticker is
+            // ffmpeg, and there is none in this image. Said plainly, because
+            // "unsupported media type" would leave the owner trying it again
+            // with a different video.
+            console.log(`[send] /send-sticker refused reason=no_conversion kind=${mimetype}`);
+            return reply(400, {
+              error: "an animated sticker has to be an animated WebP file."
+                + " This cannot turn a video or a GIF into one.",
+            });
+          }
+          if (!STICKER_TYPES.has(mimetype)) {
+            return reply(400, { error: "a sticker has to be a WebP, PNG or JPEG picture" });
+          }
+          // Checked rather than decoded and hoped over: Node's base64 reader
+          // skips whatever it does not recognise, so a data: URL prefix or a
+          // truncated upload would arrive as a short picture instead of as
+          // an error, and WhatsApp would be handed the pieces.
+          if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+            return reply(400, { error: "the sticker did not arrive as base64" });
+          }
+          const bytes = Buffer.from(encoded, "base64");
+          if (bytes.length > MAX_STICKER_BYTES) {
+            return reply(413, {
+              error: `a sticker has to be smaller than ${Math.round(MAX_STICKER_BYTES / 1024)} KB`,
+            });
+          }
+          if (!STICKER_MAGIC[mimetype](bytes)) {
+            console.log(`[send] /send-sticker refused reason=not_the_type_it_says kind=${mimetype}`);
+            return reply(400, { error: `that file is not really a ${mimetype.split("/")[1].toUpperCase()}` });
+          }
+          if (mimetype === "image/webp") {
+            // The one kind nothing resizes on the way out, so it is the one
+            // kind whose size has to be right before it leaves.
+            const size = webpSize(bytes);
+            if (!size) return reply(400, { error: "that WebP's header could not be read" });
+            if (size.width > MAX_STICKER_SIDE || size.height > MAX_STICKER_SIDE) {
+              return reply(400, {
+                error: `a sticker is ${MAX_STICKER_SIDE}x${MAX_STICKER_SIDE} or smaller, and that`
+                  + ` one is ${size.width}x${size.height}. Send it as a PNG instead and WhatsApp`
+                  + " will size it itself.",
+              });
+            }
+          }
+          // The account's own pace, when index.js has handed its queue over.
+          // A burst of stickers is one of the cheapest things in this whole
+          // dashboard to do by accident — they are sent by tapping — and
+          // dozens of sends in a minute is what an automated account looks
+          // like from WhatsApp's side.
+          const capped = queue ? queue.overCap() : "";
+          if (capped) {
+            console.log(`[send] /send-sticker held back: per-${capped} ceiling`);
+            return reply(429, {
+              error: `this account has sent as much as it safely should in a ${capped}.`
+                + " Try again a little later.",
+            });
+          }
+          if (!(await client.getChatById(chatId))) return reply(404, { error: "no such chat" });
+          // No stickerName or stickerAuthor: setting either makes the library
+          // rewrite the file's EXIF through node-webpmux to name a sticker
+          // pack, and there is no pack here — these are one-off pictures the
+          // owner picked.
+          const sent = await client.sendMessage(chatId, new MessageMedia(mimetype, encoded),
+                                                { sendMediaAsSticker: true });
+          if (queue) queue.record();
+          // The kind and the weight, which say nothing about who was talking
+          // to whom. The picture itself is content and does not go in a log.
+          console.log(`[send] /send-sticker kind=${mimetype} bytes=${bytes.length}`);
           return reply(200, {
             status: "sent",
             msg_id: (sent && sent.id && (sent.id._serialized || sent.id.$1)) || "",

@@ -300,7 +300,12 @@ client.on("disconnected", (reason) => {
 // The API used to start on "ready", so an unlinked bridge answered nothing at
 // all and the dashboard could not tell "not linked" from "not running". It
 // starts with the process now, and refuses the routes that need an account.
-startBridgeApi(client, link);
+// The queue is handed over so a send from the dashboard spends the same
+// account budget an automatic reply does. It is one account: WhatsApp counts
+// what the number sent, not which code path sent it. Only the sticker route
+// consults it today -- a sticker is the cheapest thing in the dashboard to
+// fire in bulk, and bulk is the shape that gets an account reported.
+startBridgeApi(client, link, { queue: sendQueue });
 
 // Every message in or out, so the dashboard's WhatsApp pane follows the real
 // thing instead of polling for it. Deliberately carries nothing but the chat
