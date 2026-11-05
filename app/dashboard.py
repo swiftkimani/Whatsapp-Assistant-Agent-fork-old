@@ -952,3 +952,79 @@ async def speak(body: SpeakRequest):
         log_event("speak_failed", level="error", error=type(err).__name__)
         raise HTTPException(502, "Couldn't make the voice. Is the internet connected?")
     return Response(content=audio, media_type="audio/mpeg")
+
+
+# --------------------------------------------- searching what was said ----
+# POST, although this only reads, and that is deliberate. uvicorn writes the
+# query string of every request into its access log
+# (uvicorn/protocols/utils.py, get_path_with_query_string), access logging is
+# on in both the Dockerfile and scripts/dev.sh, and on the host that log is the
+# container's. So "GET /api/messages/search?term=..." would file what the owner
+# searched for, timestamped, in the one place he cannot read privately — about
+# the worst possible home for "landlord deposit" or a doctor's name. A POST
+# body is never logged.
+#
+# app/log.py sees no paths at all, so data/app.log was never the exposure;
+# nothing below adds it either. The search is logged as a length and a count.
+
+MAX_SEARCH_TERM = 200
+
+
+class MessageSearchRequest(BaseModel):
+    term: str = Field(min_length=1, max_length=MAX_SEARCH_TERM)
+    # The same words GET /api/messages uses for the same three filters, so a
+    # period or a direction means one thing across the dashboard.
+    contact: str = Field(default="", max_length=60)
+    range: Literal["today", "yesterday", "last_7_days", "all"] = "all"
+    direction: Literal["received", "sent", "both"] = "both"
+    limit: int = Field(default=50, ge=1, le=200)
+    # The cursor: the id of the last row of the page you were given. Keyed on
+    # the row id rather than an offset because messages arrive while he reads,
+    # and an offset would skip or repeat one every time they did.
+    before_id: int | None = Field(default=None, ge=1)
+
+
+@router.post("/api/messages/search", dependencies=[Depends(require_auth)])
+def search_messages(body: MessageSearchRequest):
+    """Find handled messages by what they say.
+
+    Words rather than substrings: "bill" finds "the water bill" and "wat"
+    finds "water", but "ater" finds nothing, and several words are a phrase.
+    db.search_messages() spells out the rest, including what Arabic and emoji
+    really do.
+
+    Returns {"items": [...], "next_cursor": id|null}. Each item carries the
+    chat_id, so the page can open that conversation on the matching message,
+    and a snippet around the match rather than only the whole body.
+    """
+    # Imported here, not at the top of the file: app.controls imports
+    # require_auth from this module, so a module-level import would be a cycle.
+    # db.py takes the same way out with app.groups.
+    from app import controls
+
+    name = None
+    if body.contact:
+        name = contacts_store.canonical(body.contact)
+        if not name:
+            raise HTTPException(400, "Unknown contact.")
+    since, until = controls.time_bounds(body.range)
+    try:
+        rows = db.search_messages(
+            body.term, name=name, since=since, until=until,
+            direction={"received": "in", "sent": "out"}.get(body.direction),
+            limit=body.limit, before_id=body.before_id)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+    book = contacts_store.load()   # read once for the whole page, not per row
+    items = [{"id": r["id"], "ts": r["ts"], "direction": r["direction"],
+              "body": r["body"], "snippet": r["snippet"], "outcome": r["outcome"],
+              "chat_id": r["chat_id"] or "",
+              "name": controls.readable_who(r["chat_id"] or "", r["name"] or "", book)}
+             for r in rows]
+    # A full page means there may be another one below it.
+    next_cursor = items[-1]["id"] if len(items) == body.limit else None
+    # A length and a count. What he searched for is the most private thing this
+    # dashboard handles, and it does not go in a log line.
+    log_event("message_search", chars=len(body.term), results=len(items))
+    return {"items": items, "next_cursor": next_cursor}

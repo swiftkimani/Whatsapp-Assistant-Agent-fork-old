@@ -3,8 +3,11 @@ memory, per-contact modes and settings."""
 import os
 import sqlite3
 import time
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
+
+from app.log import log_event
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "assistant.db"
 _last_purge = 0.0
@@ -56,10 +59,21 @@ def init() -> None:
         # it an approved draft could never show what it was answering, which
         # is the whole point of approving it hours later.
         _add_column(c, "held", "msg_id", "TEXT DEFAULT ''")
+        # Whether the owner changed the draft before sending it. This is the
+        # number that says whether she is any good: sending untouched and
+        # rewriting first both count as "sent", and only this tells them
+        # apart. Recorded at send time -- what was actually sent is not kept
+        # anywhere else on the row.
+        _add_column(c, "held", "was_edited", "INTEGER DEFAULT 0")
         # Sent and dismissed rows are kept for ever, so the queue's own reads —
         # which run on every dashboard poll and ask only for the pending ones,
         # sometimes in one conversation — would scan a table that only grows.
         c.execute("CREATE INDEX IF NOT EXISTS idx_held_pending ON held (status, chat_id, id)")
+        # The quality report counts drafts over a period, and held is the one
+        # table here that is never purged -- so without this those two queries
+        # scan the whole of it and get slower every week. Measured at 50k
+        # rows: 8.7ms to 1.6ms for a day's report.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_held_ts ON held (ts)")
         c.execute("""CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT, target TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS messages (
@@ -80,6 +94,12 @@ def init() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, chat_id TEXT, name TEXT,
             direction TEXT, body TEXT, outcome TEXT)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_message_log_ts ON message_log (ts)")
+        indexed = _add_message_search(c)
+    if indexed:
+        # Said out loud because it happens once, on the first boot after this
+        # shipped, and it is the one boot that does real work before serving:
+        # a month of messages read and indexed. A count, never a body.
+        log_event("message_search_backfilled", messages=indexed)
     purge_messages()
 
 
@@ -142,6 +162,18 @@ def get(item_id: int) -> dict | None:
     with _db() as c:
         row = c.execute("SELECT * FROM held WHERE id = ?", (item_id,)).fetchone()
         return dict(row) if row else None
+
+
+def mark_edited(item_id: int) -> None:
+    """Record that the owner rewrote this draft before sending it.
+
+    Called at send time rather than inferred later: message_log keeps what
+    went out and held keeps what she wrote, but matching the two needs a fuzzy
+    join on chat and time that breaks on collapsed duplicates and repeat
+    sends. One boolean, written where both texts are already in hand.
+    """
+    with _db() as c:
+        c.execute("UPDATE held SET was_edited = 1 WHERE id = ?", (item_id,))
 
 
 def transition(item_id: int, expected: str, new: str) -> bool:
@@ -413,3 +445,220 @@ def query_messages(name: str | None = None, since: float | None = None, until: f
     params.append(max(1, min(limit, 500)))
     with _db() as c:
         return [dict(r) for r in c.execute(sql, params)]
+
+
+# ---- searching the message log by what was said ----
+# "What did the landlord say about the water bill" was unanswerable here: the
+# text was on disk and nothing could look inside it. The obvious LIKE '%term%'
+# cannot use an index, so every search would read every body in the log.
+#
+# So the one extra table in this schema (§D3.1): an external-content FTS5
+# index over message_log.body. External content means the bodies stay in
+# message_log and this holds only the inverted index over them — no second
+# copy of anyone's messages. Its row count tracks message_log exactly, it is
+# written only by the three triggers below, and it is read only by
+# search_messages(). Growth is message_log's growth, which the retention sweep
+# bounds at MESSAGE_RETENTION_DAYS.
+#
+# Triggers rather than an extra write inside log_message(), because
+# message_log is also deleted from (purge_messages) and updated directly —
+# an index kept in step by hand would drift into offering the owner messages
+# that have already been purged.
+
+# unicode61 is named rather than left to the default so the matching rules are
+# pinned here instead of inherited from whatever SQLite is in the image.
+# "remove_diacritics 2" is what makes café, cafe and CAFÉ one word; it does not
+# touch Arabic harakat, which stay part of the word (see search_messages).
+_FTS_TOKENIZER = "unicode61 remove_diacritics 2"
+
+MIN_SEARCH_CHARS = 2
+# How much of a long message comes back beside a match. Twelve tokens is about
+# a line of chat: enough to read the sentence the word is in, little enough
+# that a page of results stays a page and not a transcript.
+SNIPPET_TOKENS = 12
+SNIPPET_ELLIPSIS = "…"
+
+
+def _add_message_search(c) -> int:
+    """Create the search index and its triggers, and fill it in once. Returns
+    how many existing messages it indexed, which is 0 on every boot but the
+    one where the index first appears.
+
+    Written in the defensive style of _add_column(): an assistant.db that
+    predates this runs through it and comes out searchable, with the month of
+    messages it already holds indexed rather than only what arrives next.
+    """
+    # Whether the index is new is the backfill's guard. A settings flag would
+    # say "we did this once" even after someone dropped the table to rebuild
+    # it; sqlite_master says what is actually there. Either way it cannot run
+    # on every boot, which on a full log would mean re-indexing a month of
+    # messages every restart.
+    fresh = not c.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_log_fts'").fetchone()
+    c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS message_log_fts USING fts5("
+              f"body, content='message_log', content_rowid='id', tokenize='{_FTS_TOKENIZER}')")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS message_log_fts_insert
+                 AFTER INSERT ON message_log BEGIN
+                   INSERT INTO message_log_fts (rowid, body) VALUES (new.id, new.body);
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS message_log_fts_delete
+                 AFTER DELETE ON message_log BEGIN
+                   INSERT INTO message_log_fts (message_log_fts, rowid, body)
+                   VALUES ('delete', old.id, old.body);
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS message_log_fts_update
+                 AFTER UPDATE ON message_log BEGIN
+                   INSERT INTO message_log_fts (message_log_fts, rowid, body)
+                   VALUES ('delete', old.id, old.body);
+                   INSERT INTO message_log_fts (rowid, body) VALUES (new.id, new.body);
+                 END""")
+    if not fresh:
+        return 0
+    return c.execute(
+        "INSERT INTO message_log_fts (rowid, body) SELECT id, body FROM message_log").rowcount
+
+
+# The pieces a character can be built from that mean nothing on their own: the
+# combining marks, the five emoji skin-tone modifiers, the zero-width joiner
+# that holds a family emoji together, the variation selectors and the enclosing
+# keycap.
+#
+# FTS5's snippet() cuts on token boundaries, and to unicode61 a run of emoji is
+# one long gap between two tokens — so a cut lands inside one. Measured, not
+# assumed: a window around "two" in "one 👩🏽‍💻 two" comes back as "…🏽‍💻 two",
+# a skin tone and a laptop with nobody in front of them. The bridge learned
+# this in JavaScript (wa_read.js cutTo) and tts.py learned it in Python. Third
+# time, same rule: a grapheme cluster is kept whole or left out.
+_SKIN_TONES = frozenset(chr(cp) for cp in range(0x1F3FB, 0x1F400))
+_REGIONAL_INDICATORS = frozenset(chr(cp) for cp in range(0x1F1E6, 0x1F200))
+# Joiners that need something after them as well as before, so one left at the
+# end of a window is as broken as one left at the start.
+_JOINERS = frozenset("\u200d\ufe0e\ufe0f\u20e3")   # ZWJ, the two variation selectors, keycap
+
+
+def _continues_previous(ch: str) -> bool:
+    """Whether this character is only ever part of the one before it."""
+    return (unicodedata.category(ch) in ("Mn", "Mc", "Me")
+            or ch in _SKIN_TONES or ch in _JOINERS)
+
+
+def _regional_run(text: str) -> int:
+    """How many regional indicators `text` starts with."""
+    run = 0
+    while run < len(text) and text[run] in _REGIONAL_INDICATORS:
+        run += 1
+    return run
+
+
+def _whole_characters(text: str) -> str:
+    """`text` with half a character at either end taken off."""
+    start, end = 0, len(text)
+    while start < end and _continues_previous(text[start]):
+        start += 1
+    while end > start and text[end - 1] in _JOINERS:
+        end -= 1
+    text = text[start:end]
+    # A flag is exactly two regional indicators and nothing else is built out
+    # of them, so an odd run at either edge is half a flag.
+    if _regional_run(text) % 2:
+        text = text[1:]
+    if _regional_run(text[::-1]) % 2:
+        text = text[:-1]
+    return text
+
+
+def _trim_snippet(raw: str) -> str:
+    """One snippet() window, keeping its ellipses and dropping half characters."""
+    head = SNIPPET_ELLIPSIS if raw.startswith(SNIPPET_ELLIPSIS) else ""
+    middle = raw[len(head):]
+    tail = SNIPPET_ELLIPSIS if middle.endswith(SNIPPET_ELLIPSIS) else ""
+    return head + _whole_characters(middle[:len(middle) - len(tail)]) + tail
+
+
+def _fts_phrase(term: str) -> str:
+    """What the owner typed, as an FTS5 MATCH expression.
+
+    The whole term becomes one quoted phrase, so none of MATCH's own
+    vocabulary can leak out of it: AND, OR, NOT, NEAR, a bare "-", a colon,
+    brackets and a stray "*" are all just text inside quotes, and the only
+    character quotes themselves care about is the double quote, which FTS5
+    escapes by doubling. That is the whole of the escaping — the term still
+    travels as a bound parameter, never spliced into SQL (§B11).
+
+    The trailing "*" makes the last token of the phrase a prefix, so "wat"
+    finds "water" while he is still typing.
+    """
+    return '"' + term.replace('"', '""') + '" *'
+
+
+def search_messages(term: str, name: str | None = None, since: float | None = None,
+                    until: float | None = None, direction: str | None = None,
+                    limit: int = 50, before_id: int | None = None) -> list[dict]:
+    """Messages whose text matches `term`, newest first, with the same filters
+    and the same ceiling query_messages() has.
+
+    What matches, measured against this corpus rather than assumed:
+
+    * Whole words, anywhere in the message, and the last word by prefix. "bill"
+      finds "the water bill"; "wat" finds "water"; "ater" finds nothing,
+      because this is a word index and not a substring scan.
+    * Several words are a phrase: "water bill" wants them side by side.
+    * Case and Latin accents are folded both ways — landlord/LANDLORD,
+      café/cafe/CAFÉ — which is more than LIKE would give, since SQLite's LIKE
+      only folds ASCII.
+    * Kiswahili and Sheng behave as English does: both are Latin script, so
+      "maji", "MAJI" and "pes" all find "Nitatuma pesa ya maji kesho".
+    * Arabic words match as words: "الفاتورة" finds "الفاتورة لازم تتدفع". What
+      does not work is searching for part of one — "فاتورة" does not find
+      "الفاتورة", because the attached article makes a different word, and
+      harakat count as part of the word too, so "مرحبا" does not find "مَرحبًا".
+      A prefix does work ("الفات" finds it), which is the way in.
+    * No matching on emoji or punctuation: unicode61 treats both as the spaces
+      between words, so a search for "😂" or "%" finds nothing at all rather
+      than everything. For the same reason "%" and "_" cannot act as wildcards
+      the way they would in a LIKE pattern — they are not pattern characters
+      here, they are separators — and "100%" finds the word "100".
+    * CJK runs as one token, so "明天" does not find "我们明天见面". Noted
+      because it is a real gap, not because this corpus needs it.
+
+    `before_id` is the cursor: pass the id of the last row you were given and
+    the next page carries on below it. Keyed on id rather than an offset
+    because messages arrive while the owner reads, and an offset would skip or
+    repeat a row each time one did.
+    """
+    wanted = " ".join((term or "").split())
+    if len(wanted) < MIN_SEARCH_CHARS:
+        # Refused here rather than answered with the whole table: one character
+        # and a prefix match is every message in the log.
+        raise ValueError(f"Type at least {MIN_SEARCH_CHARS} characters to search.")
+
+    sql = ("SELECT m.id, m.ts, m.chat_id, m.name, m.direction, m.body, m.outcome, "
+           "snippet(message_log_fts, 0, '', '', ?, ?) AS snippet "
+           "FROM message_log_fts JOIN message_log AS m ON m.id = message_log_fts.rowid "
+           "WHERE message_log_fts MATCH ?")
+    # The FTS table cannot be aliased — "f MATCH ?" is "no such column: f" —
+    # so it is spelled out and only message_log carries an alias.
+    params: list = [SNIPPET_ELLIPSIS, SNIPPET_TOKENS, _fts_phrase(wanted)]
+    if name:
+        sql += " AND LOWER(m.name) = LOWER(?)"
+        params.append(name)
+    if since is not None:
+        sql += " AND m.ts >= ?"
+        params.append(since)
+    if until is not None:
+        sql += " AND m.ts < ?"
+        params.append(until)
+    if direction in ("in", "out"):
+        sql += " AND m.direction = ?"
+        params.append(direction)
+    if before_id is not None:
+        sql += " AND m.id < ?"
+        params.append(before_id)
+    sql += " ORDER BY m.id DESC LIMIT ?"
+    params.append(max(1, min(limit, 500)))
+
+    with _db() as c:
+        rows = [dict(r) for r in c.execute(sql, params)]
+    for row in rows:
+        row["snippet"] = _trim_snippet(row["snippet"])
+    return rows

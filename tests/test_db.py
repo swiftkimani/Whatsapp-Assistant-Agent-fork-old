@@ -157,3 +157,35 @@ def test_set_modes_with_nothing_to_write_writes_nothing(fresh_db):
     assert fresh_db.set_modes([], "hold") == 0
     assert fresh_db.set_modes(["", "  "], "hold") == 0
     assert fresh_db.all_modes() == {}
+
+
+def test_an_existing_database_of_messages_is_indexed_for_search_exactly_once(tmp_path, monkeypatch):
+    """A database written before the search index existed comes out of init()
+    searchable, with the month of messages it already holds indexed rather
+    than only what arrives afterwards — and the next boot indexes nothing,
+    which on a full log would otherwise mean re-reading every message on every
+    restart."""
+    import sqlite3
+    import time
+
+    from app import db
+    path = tmp_path / "before-search.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE message_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, "
+                "chat_id TEXT, name TEXT, direction TEXT, body TEXT, outcome TEXT)")
+    old.executemany(
+        "INSERT INTO message_log (ts, chat_id, name, direction, body, outcome) VALUES (?, ?, ?, ?, ?, ?)",
+        [(time.time(), "1@c.us", "Landlord", "in", "the water bill is 2,400", "replied"),
+         (time.time(), "2@c.us", "Kevo", "in", "niaje bro", "replied")])
+    old.commit()
+    old.close()
+    monkeypatch.setattr(db, "DB_PATH", path)
+
+    db.init()
+    assert [r["name"] for r in db.search_messages("water bill")] == ["Landlord"]
+    with db._db() as c:
+        assert db._add_message_search(c) == 0      # a second boot has nothing to do
+
+    # And the triggers carry on from there, so new messages need no backfill.
+    db.log_message("3@c.us", "Dee", "in", "another water bill came", "held")
+    assert [r["name"] for r in db.search_messages("water bill")] == ["Dee", "Landlord"]
