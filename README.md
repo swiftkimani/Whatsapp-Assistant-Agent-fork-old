@@ -175,9 +175,15 @@ cp .env.example .env            # then fill in ANTHROPIC_API_KEY and ALLOWED_CON
    model as true: an empty section makes the assistant say it isn't sure, a guessed one makes it
    state something false in your name. `data/kb/FILL_THIS_IN.md` (never read by the app) says
    what belongs in each section.
-3. **`data/style_examples.md`**: short lines in your own voice, one per `-` bullet, grouped by situation.
-4. *(optional)* Build the style index from a WhatsApp chat export (`app/export_parser.py` parses it into reply pairs).
-   Without `data/style_index/` this step is simply skipped.
+3. **`data/style_examples.md`**: short lines in your own voice, one per `-` bullet. You do not have to
+   write these by hand: `POST /api/style/learn` reads your own recent WhatsApp history through the
+   bridge and writes them for you, and `GET /api/style/status` says whether the file is still the demo
+   lines it ships with. Hand-written lines are backed up before anything overwrites them.
+   It takes effect on the next message, with no restart.
+   This file is the ONLY thing teaching the assistant your voice, so leaving the demo lines in place is
+   what makes it sound like a generic bot rather than like you.
+4. *(optional)* A WhatsApp chat export can be parsed instead (`app/export_parser.py`), which is the same
+   path the learn step reuses.
 
 ```bash
 uvicorn app.main:app --port 8000        # 1. start the backend first
@@ -251,7 +257,10 @@ read before a first run.
 | `ASSISTANT_NAME` | Arianna's name (also edit the wake-word spellings in `dashboard.html`) |
 | `MESSAGE_RETENTION_DAYS` | How long message history is kept (default 30) |
 | `REPLY_WITH_VOICE` | Send voice replies on WhatsApp for voice notes (default `false`) |
-| `STYLE_RETRIEVAL`, `EMBEDDING_MODEL` | Retrieval of similar past replies |
+| `STYLE_RETRIEVAL` | Show the model similar past replies of yours (word overlap, no model to download) |
+| `ALLOW_GROUPS` | Whether groups reach the assistant at all; each group then has its own setting, starting at "leave alone" |
+| `GROUP_REPLIES_PER_HOUR`, `GROUP_MIN_GAP_SECONDS` | How much she may say in one group (3 an hour, 5 minutes apart) |
+| `BURST_QUIET_MS`, `BURST_CEILING_MS`, `BURST_MAX_MESSAGES` | How long a chat must go quiet before a burst of messages is answered as one reply |
 
 ## Tests and evaluation
 
