@@ -129,6 +129,10 @@ class IncomingMessage(BaseModel):
     # spoke last; app.groups.compose_transcript turns this into text that says
     # who said what. Bounded because it arrives from outside.
     turns: list[dict] = Field(default_factory=list, max_length=20)
+    # The WhatsApp id of the message being answered. The bridge quotes with it
+    # directly on an automatic reply; it is carried here so a draft the owner
+    # approves later can quote the same message.
+    msg_id: str | None = Field(default=None, max_length=120)
 
 
 def _require_bridge(token: str) -> None:
@@ -155,6 +159,23 @@ def _group_decision(msg: "IncomingMessage") -> groups.Decision:
         addressed=msg.addressed, addressed_how=msg.addressed_how or "",
         sender_name=msg.sender_name or "", at=time.time(),
     ), policy)
+
+
+def _should_quote(msg: "IncomingMessage", model_said: bool) -> bool:
+    """Whether the reply shows what it is answering.
+
+    The model's judgement, widened by two things it cannot see from the text
+    alone. In a group a bare reply is addressed to the room rather than to
+    anyone, so it always quotes. And a burst of messages is answered as one
+    turn, so the reply answers something other than the last line -- which is
+    exactly the confusion the quote exists to remove, and exactly the case the
+    model cannot detect, because it was handed one joined turn.
+    """
+    if msg.is_group:
+        return True
+    if len(msg.turns) > 1:
+        return True
+    return model_said
 
 
 def _model_text(msg: "IncomingMessage") -> str:
@@ -264,7 +285,7 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
     if action == "hold":
         db.add_held(msg.from_, result["resolved_text"], result["reply_text"],
                     reason=reason, number=msg.number, why=result.get("why", ""),
-                    push_name=msg.push_name or "")
+                    push_name=msg.push_name or "", msg_id=msg.msg_id or "")
         db.log("held", msg.from_)
         db.log_message(msg.from_, name, "in", result["resolved_text"], "held")
         log_event("held", chat=anon(msg.from_), reason=reason)
@@ -282,7 +303,7 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
     response = {"action": "send", "reply_text": result["reply_text"],
                 # The bridge attaches the quote; it is the only side holding
                 # the incoming message's WhatsApp id.
-                "quote": bool(result.get("quote")),
+                "quote": _should_quote(msg, bool(result.get("quote"))),
                 "reply_audio_base64": None}
 
     if REPLY_WITH_VOICE and msg.type == "voice":

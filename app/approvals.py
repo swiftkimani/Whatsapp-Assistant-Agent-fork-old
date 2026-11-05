@@ -252,10 +252,25 @@ def send_held(item_id: int, body: SendRequest):
     # owner clicked stood for.
     duplicates = _duplicates_of(item)
 
+    # An approved draft is the case that needs the quote most: it goes out
+    # long after the message it answers, often after that person has said
+    # something else, so without it the reply arrives attached to nothing.
+    # ignoreQuoteErrors is left at the bridge's default here rather than being
+    # forced: a message that has since been deleted must not cost the owner
+    # the reply they just approved.
+    payload = {"chat_id": item["chat_id"], "text": text,
+               # The bridge refuses a group for anything typed into the
+               # dashboard. This is not that: the owner chose this group, read
+               # it, and pressed send on one answer. Without the opt-in a group
+               # could produce drafts that can never be sent.
+               "allow_group": True}
+    if item.get("msg_id"):
+        payload["quoted_msg_id"] = item["msg_id"]
+
     try:
         r = httpx.post(
             f"{os.getenv('BRIDGE_API_URL', 'http://127.0.0.1:3001')}/send-reply",
-            json={"chat_id": item["chat_id"], "text": text},
+            json=payload,
             headers={"x-bridge-token": os.getenv("BRIDGE_API_TOKEN", "")},
             timeout=30,
         )

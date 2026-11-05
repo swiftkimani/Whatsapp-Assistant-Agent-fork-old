@@ -447,6 +447,11 @@ async function answerBurst(turn) {
       mimetype: turn.media ? turn.media.mimetype : null,
       // The contact's WhatsApp display name, once for the whole burst.
       push_name: turn.pushName,
+      // The message being answered. The bridge quotes with this directly on
+      // an automatic reply, but the backend needs it too: a draft the owner
+      // approves hours later is sent down a different path, and without the
+      // id stored on the held row that reply can never quote anything.
+      msg_id: turn.lastId,
       // ---- groups ----
       is_group: String(turn.chatId).endsWith("@g.us"),
       // A burst is addressed if any message in it addressed her: somebody
@@ -462,6 +467,7 @@ async function answerBurst(turn) {
         body: String((m && m.body) || ""),
         number: m.number || "",
         sender_id: m.senderId || "",
+        msg_id: m.id || "",
       })),
     };
     console.log(`[burst] ${anon(turn.chatId)} ${turn.count} message(s) folded into one turn ` +

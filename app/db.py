@@ -51,6 +51,11 @@ def init() -> None:
         # it. Only ever read back as text: it is a stranger's own words, so it
         # is stored and used as a bound parameter and never built into SQL.
         _add_column(c, "held", "push_name", "TEXT DEFAULT ''")
+        # The WhatsApp id of the message this draft answers, so a reply the
+        # owner approves can quote it the way an automatic one does. Without
+        # it an approved draft could never show what it was answering, which
+        # is the whole point of approving it hours later.
+        _add_column(c, "held", "msg_id", "TEXT DEFAULT ''")
         # Sent and dismissed rows are kept for ever, so the queue's own reads —
         # which run on every dashboard poll and ask only for the pending ones,
         # sometimes in one conversation — would scan a table that only grows.
@@ -81,12 +86,14 @@ def init() -> None:
 # ---- held replies ----
 
 def add_held(chat_id: str, incoming: str, reply: str, reason: str = "",
-             number: str | None = None, why: str = "", push_name: str = "") -> int:
+             number: str | None = None, why: str = "", push_name: str = "",
+             msg_id: str = "") -> int:
     with _db() as c:
         cur = c.execute(
-            "INSERT INTO held (ts, chat_id, incoming, reply, reason, number, why, push_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (time.time(), chat_id, incoming, reply, reason, number or "", why, push_name or ""))
+            "INSERT INTO held (ts, chat_id, incoming, reply, reason, number, why, push_name, msg_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (time.time(), chat_id, incoming, reply, reason, number or "", why,
+             push_name or "", msg_id or ""))
         return cur.lastrowid
 
 

@@ -463,9 +463,20 @@ function startBridgeApi(client, link, { queue = null } = {}) {
           const text = String(data.text || "").trim();
           // Which earlier message this answers, when the owner picked one.
           const quotedId = String(data.quoted_msg_id || "");
-          // No hyphen here on purpose: that is what keeps groups out, which
-          // the dashboard promises and the held queue depends on.
-          if (!/^\d[\d:]*@(c\.us|lid)$/.test(chatId)) return reply(400, { error: "bad chat id" });
+          // Groups are refused unless the caller says otherwise, and only the
+          // held queue does. Free text typed into the dashboard must never be
+          // able to reach a group: that is a promise about what a stolen
+          // session can do with this account.
+          //
+          // Approving a held draft is a different act. The owner chose that
+          // group, read what was said in it and pressed send on an answer to
+          // one message -- refusing it would mean a group could produce drafts
+          // that can never be sent, which is what happened when groups first
+          // started being held.
+          const allowGroup = data.allow_group === true;
+          const idShape = allowGroup ? /^\d[\d:-]*@(c\.us|lid|g\.us)$/
+                                     : /^\d[\d:]*@(c\.us|lid)$/;
+          if (!idShape.test(chatId)) return reply(400, { error: "bad chat id" });
           if (!text || text.length > 4000) return reply(400, { error: "bad text" });
           // Checked rather than passed through, for the reason chat_id is:
           // this id is handed to the browser page to look up, and the page is

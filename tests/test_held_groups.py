@@ -335,3 +335,31 @@ def test_a_one_line_reason_is_left_exactly_as_it_is(signed_in, fresh_db):
 
     card = cards(signed_in)[0]
     assert card["why_short"] == card["why"] == "Money, and I am not sure which account."
+
+
+# ---- quoting what the draft answers ----
+# An approved draft is the case that needs a quote most: it goes out long after
+# the message it answers, often after that person has said something else.
+
+def test_an_approved_draft_quotes_the_message_it_answers(signed_in, fresh_db, bridge):
+    item = fresh_db.add_held(LANDLORD, "Na ile invoice?", "Nitatuma leo jioni.",
+                             msg_id="false_254712345678@c.us_3EB0AA11BB11")
+    assert signed_in.post(f"/api/held/{item}/send", json={}).status_code == 200
+    assert bridge[0]["quoted_msg_id"] == "false_254712345678@c.us_3EB0AA11BB11"
+
+
+def test_a_draft_with_no_message_id_still_sends(signed_in, fresh_db, bridge):
+    """Rows held before the id was stored, and anything the bridge could not
+    name. Losing the quote is acceptable; losing the reply is not."""
+    item = fresh_db.add_held(LANDLORD, "Na ile invoice?", "Nitatuma leo jioni.")
+    assert signed_in.post(f"/api/held/{item}/send", json={}).status_code == 200
+    assert "quoted_msg_id" not in bridge[0]
+
+
+def test_an_approved_group_draft_is_allowed_through(signed_in, fresh_db, bridge):
+    """The bridge refuses a group for anything typed into the dashboard. A
+    draft the owner approved is not that, and without the opt-in a group could
+    produce drafts that could never be sent."""
+    item = fresh_db.add_held("254712345678-1600000000@g.us", "Tuko wapi?", "Niko njiani.")
+    assert signed_in.post(f"/api/held/{item}/send", json={}).status_code == 200
+    assert bridge[0]["allow_group"] is True

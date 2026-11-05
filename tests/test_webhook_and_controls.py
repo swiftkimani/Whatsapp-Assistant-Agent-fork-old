@@ -209,3 +209,31 @@ def test_the_display_name_the_sender_chose_travels_onto_the_held_draft(signed_in
     assert signed_in.post("/webhook", json=msg(), headers=HEADERS).json()["action"] == "hold"
     assert fresh_db.pending()[0]["push_name"] == ""
     assert signed_in.post("/webhook", json=msg(push_name="x" * 121), headers=HEADERS).status_code == 422
+
+
+# ---- showing what the reply answers ----
+# The model decides this from the text, but two things it cannot see from one
+# joined turn settle it either way.
+
+def test_a_group_reply_always_shows_what_it_answers(client, agent, fresh_db):
+    """In a group a bare reply is addressed to the room rather than to anyone,
+    so it quotes whatever the model thought."""
+    assert main._should_quote(
+        main.IncomingMessage(**{"from": "254712345678-1600000000@g.us", "body": "hi",
+                                "is_group": True}), False) is True
+
+
+def test_answering_several_messages_at_once_shows_which_one(client, agent, fresh_db):
+    """A burst is answered as one turn, so the reply answers something other
+    than the last line -- the exact confusion the quote removes, and the one
+    the model cannot detect because it was handed the messages joined."""
+    msg = main.IncomingMessage(**{"from": "254712345678@c.us", "body": "a\nb",
+                                  "turns": [{"body": "a"}, {"body": "b"}]})
+    assert main._should_quote(msg, False) is True
+
+
+def test_one_message_in_a_direct_chat_is_left_to_the_model(client, agent, fresh_db):
+    one = main.IncomingMessage(**{"from": "254712345678@c.us", "body": "niaje",
+                                  "turns": [{"body": "niaje"}]})
+    assert main._should_quote(one, True) is True
+    assert main._should_quote(one, False) is False

@@ -463,16 +463,26 @@ ANSWER_SCHEMA = {
                 "description": "One short clause, to the owner, saying why this is safe to send "
                                "or why they need to handle it. At most 12 words, no sentence."},
         # Whether to attach the incoming message as a quote, the way a person
-        # swipes to reply. Left to the model because it is a judgement about
-        # the conversation, not a rule: quoting every single reply is the mark
-        # of a bot, and quoting none of them loses the thread in a group or
-        # after a gap.
+        # swipes to reply. Still the model's judgement, because it is one --
+        # but the default is now to quote, and the caller ORs it with facts
+        # the model cannot see (a group, how many messages it is answering).
+        #
+        # The old rule was "only when the reply would otherwise be confusing",
+        # which in practice meant almost never. Two things changed since: a
+        # burst of messages is answered as one turn, so a reply routinely
+        # answers something other than the last line; and sends are paced, so
+        # the reply lands a while after the message it answers rather than
+        # immediately under it. Both make the quote the normal case here.
         "quote": {"type": "boolean",
-                  "description": "True only when the reply would be confusing without showing "
-                                 "which message it answers: in a group, when several things were "
-                                 "asked at once and this answers one of them, or when hours have "
-                                 "passed since that message. False for an ordinary back-and-forth "
-                                 "where it is obvious what you are replying to."},
+                  "description": "Attach their message to your reply, the way swiping to reply "
+                                 "does. Default to TRUE: replies here do not go out instantly, "
+                                 "so by the time yours lands they have usually said or done "
+                                 "something else, and showing what you are answering is what a "
+                                 "person does. Always true in a group, when they sent several "
+                                 "messages and you are answering one, when they asked more than "
+                                 "one thing, or when any time has passed. False only for the "
+                                 "immediate next line of a live back-and-forth, where quoting "
+                                 "would be odd."},
     },
     "required": ["reply", "grounded", "needs_owner", "why", "quote"],
     "additionalProperties": False,
