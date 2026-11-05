@@ -79,7 +79,7 @@
      clip instead. */
   html,body{overflow-x:hidden}
   .panel{overflow-x:hidden}
-  .msg,.wa-prev,.wa-name,.draft,.note{overflow-wrap:anywhere}
+  .msg,.mrow,.wa-prev,.wa-name,.draft,.note{overflow-wrap:anywhere}
   [hidden]{display:none !important}
   body{margin:0;height:100vh;height:100dvh;display:flex;justify-content:center;
        color:var(--text);background:var(--bg);
@@ -195,6 +195,32 @@
   /* The one thing in this sheet that can be wrong rather than merely off, so
      it is coloured like a warning instead of like a description. */
   .srow-d.warn{color:var(--warning)}
+
+  /* ---- the report: is she any good ----
+     Sentences, not a wall of stat cards. Every number worth reading is
+     already inside the sentence the server wrote for it, so printing it again
+     in a bordered box with a shadow would be decoration and nothing else.
+     What the sentences cannot carry — the full list of reasons she held
+     something — is a hairline list, the same shape as a settings row. */
+  #reportBody{margin-top:var(--s4)}
+  #reportBody p{margin:var(--s2) 0 0}
+  #reportBody .sheet-group{margin-top:var(--s6)}
+  #reportBody > :first-child{margin-top:0}
+  /* The trend is the one line he scans for rather than reads, so it carries a
+     second signal beside its own words: the same dot the rail uses. */
+  .rep-dir{display:flex;gap:var(--s2);align-items:flex-start}
+  .rep-dir .statdot{margin-top:.5em}
+  .rep-dir[data-dir="better"] .statdot{background:var(--success)}
+  .rep-dir[data-dir="worse"] .statdot{background:var(--warning)}
+  .rep-dir[data-dir="level"] .statdot{background:var(--info)}
+  .rep-why{margin:var(--s2) 0 0;padding:0;list-style:none}
+  .rep-why li{display:flex;gap:var(--s3);justify-content:space-between;align-items:baseline;
+              padding:var(--s2) 0;border-bottom:1px solid var(--border);font-size:var(--f-sm)}
+  .rep-why li:last-child{border-bottom:0}
+  .rep-why b{flex:none;font-variant-numeric:tabular-nums}
+  /* What the report does not cover, kept quiet and last: a caveat that shouts
+     is read as the finding. */
+  .rep-foot{margin-top:var(--s6);padding-top:var(--s3);border-top:1px solid var(--border)}
   /* On a phone these two have no slot in the bottom bar, so this is the way
      to them. On a wide screen the rail already shows them and the group is
      simply a second route. */
@@ -261,6 +287,18 @@
   .addrow label{max-width:320px}
   .panel{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);
          background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
+  /* The scrollbar sits quietly. The platform's own is a heavy bar laid over
+     the rows, and in a list the first thing the eye lands on should be a
+     name, not the furniture. It takes its colours from the same roles
+     everything else does, so it is right in both themes, and the thumb comes
+     forward on hover — which is the only time anybody is aiming at it. */
+  .panel{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+  .panel:hover,.panel:focus-within{scrollbar-color:var(--text-muted) transparent}
+  .panel::-webkit-scrollbar{width:10px;height:10px}
+  .panel::-webkit-scrollbar-track{background:transparent}
+  .panel::-webkit-scrollbar-thumb{border:3px solid transparent;border-radius:var(--r-pill);
+         background:var(--border);background-clip:content-box}
+  .panel:hover::-webkit-scrollbar-thumb{background:var(--text-muted);background-clip:content-box}
   .note{margin:0;color:var(--text-muted);font-size:var(--f-sm)}
   .filters{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
   .filters select{flex:1;min-width:120px}
@@ -278,16 +316,22 @@
   .wa-row:hover{background:var(--surface-raised)}
   .wa-openrow{display:flex;gap:var(--s3);align-items:center;width:100%;padding:0;border:0;
               background:transparent;text-align:start;font:inherit;color:inherit}
-  /* The AI switch lives on the row, so a whole list can be set without
-     opening a single conversation. */
-  .wa-ai{display:inline-flex;align-items:center;gap:var(--s2);align-self:flex-start;
-         font-size:var(--f-xs);font-weight:600;color:var(--text-muted);cursor:pointer;
-         padding:2px var(--s2);border-radius:var(--r-pill);border:1px solid var(--border)}
-  .wa-ai input{width:auto;padding:0;margin:0;accent-color:var(--primary)}
-  .wa-ai.on{color:var(--primary);border-color:var(--primary)}
-  .wa-ai.muted{display:none}          /* a group cannot be answered; saying so on every row is noise */
+  /* There is no AI control in a list row any more. A three-way dropdown in
+     every row was about 100px of permanent chrome for a setting changed once
+     a month, and the row has nothing to give: at the narrowest the grip
+     allows it had taken the names down to "K." and "M". The decision is made
+     where it is thought about — in the conversation's own header and in the
+     Contacts tab — and the row says the state in a word instead. */
   .wa-find{display:flex;gap:var(--s2);align-items:center}
   .wa-search{flex:1;min-width:0}
+  /* What search can and cannot do, said where it is about to matter and
+     nowhere else. A line of rules permanently above the message list is a line
+     of conversation he does not get to read, every day, for a feature he uses
+     occasionally — so it appears while the field is in use and is gone the
+     rest of the time. */
+  #msgFindHint{display:none;margin:0}
+  .wa-find:focus-within + #msgFindHint,
+  .wa-find:has(#msgFind:not(:placeholder-shown)) + #msgFindHint{display:block}
   .wa-bar{display:flex;gap:var(--s2);align-items:center;min-width:0}
   /* One line, always. Seven pills wrapped onto a second and a third row, and
      with the count below them that was three conversations' worth of height
@@ -323,18 +367,34 @@
                       box-shadow:inset 3px 0 0 var(--primary)}
   .panel.flat .wa-row.wa-assistant{background:var(--primary-weak)}
   .panel.flat .note{padding:var(--s3)}
-  /* The AI switch rides in the right-hand column with the time, so a row is
-     two lines like a WhatsApp row instead of three. */
-  .panel.flat .wa-ai{align-self:center;flex:none}
+  /* The name has a floor. Everything else in the row is content you can read
+     half of and still use — a cut preview, a clipped time — and the name is
+     the one thing you cannot, so the flexible column stops shrinking here and
+     the right-hand column yields instead. 88px holds eight or nine characters
+     at the narrowest the grip allows, with the time, the unread count and the
+     word still whole beside it. */
+  .panel.flat .wa-main{min-width:88px}
+  .panel.flat .wa-side{flex:0 1 auto;min-width:0}
+  .panel.flat .wa-foot{min-width:0}
   .wa-row.wa-assistant{border-color:var(--primary);background:var(--primary-weak)}
   .wa-row.wa-assistant .avatar{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   #assistantPane{flex:1;min-height:0;display:flex;flex-direction:column;gap:var(--s2)}
   #assistantPane #log{flex:1;min-height:0}
   .wa-row[aria-current="true"]{border-color:var(--primary);background:var(--primary-weak)}
   .wa-main{min-width:0;flex:1}
-  .wa-name{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The name, and beside it the one thing that used to ride on the end of it
+     as text: "· group". Eight characters of the name, every time, to say
+     something the glyph says in thirteen pixels. */
+  .wa-title{display:flex;align-items:center;gap:var(--s1);min-width:0}
+  .wa-glyph{flex:none;display:grid;place-items:center;color:var(--text-muted)}
+  .wa-name{display:block;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wa-prev{display:block;color:var(--text-muted);font-size:var(--f-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wa-side{display:flex;flex-direction:column;align-items:flex-end;gap:var(--s1);flex:none}
+  /* The second line of the right-hand column: the unread count, and the word
+     for what the assistant does here. It keeps the height of a badge whether
+     it holds one or not, so no two rows in the list are different heights. */
+  .wa-foot{display:flex;align-items:center;justify-content:flex-end;gap:var(--s2);
+           min-height:20px}
   .wa-when{color:var(--text-muted);font-size:var(--f-xs);white-space:nowrap}
   .wa-kind{display:block;font-size:var(--f-xs);font-weight:600;color:var(--text-muted);margin-bottom:var(--s1)}
   .msg time{display:block;margin-top:var(--s1);font-size:var(--f-xs);color:var(--text-muted)}
@@ -350,8 +410,13 @@
   #waAutoNote{margin:0}
   .waauto input{width:auto;padding:0;accent-color:var(--primary)}
   .waauto.on{color:var(--primary)}
-  /* On the list, a chat the assistant answers says so in a word, not a colour. */
-  .wa-auto{font-size:var(--f-xs);font-weight:600;color:var(--primary);white-space:nowrap}
+  /* What the assistant does here, said in a word rather than in a colour —
+     the colour is the second signal, never the only one. Nothing is written
+     for a conversation she leaves alone: a list where two rows in three say
+     "Off" is a list saying nothing, and silence already means off. */
+  .wa-auto{min-width:0;font-size:var(--f-xs);font-weight:600;color:var(--primary);
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wa-auto.waits{color:var(--text-muted)}
   /* Both panes are always there: the list used to be replaced by the thread,
      so every "back" was a round trip to fetch chats that had never changed. */
   /* The whole view is a column: the two panes, then the reply bar sitting
@@ -493,8 +558,52 @@
   .msg.emoji-only time{color:var(--text-muted);opacity:1}
   .wa-row{padding-block:var(--s1)}
   .me{align-self:flex-end;background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+  /* Quiet text inside the owner's own bubble. --text-muted is a neutral grey
+     picked to sit on --surface, and this bubble's background is the accent
+     colour: a message whose only words are its label — "Waiting for this
+     message", which is what WhatsApp calls one that has not decrypted yet —
+     came out grey on green and all but invisible. Quiet in here means the
+     bubble's own foreground, dimmed, which is already what the timestamp and
+     the quote do rather than a colour of their own. */
+  .me .wa-kind{color:var(--primary-fg);opacity:.82}
   .bot{align-self:flex-start;background:var(--surface-raised)}
   .err{color:var(--danger)}
+  /* An address somebody sent, built to answer the question the text of a URL
+     cannot: where it actually goes. The hostname is the part that matters —
+     bit.ly and benardkimani.co.ke read the same once a tracking path has
+     eaten the line — so the host is shown whole and it is the path that is
+     cut. The whole address stays in href and in the tooltip.
+
+     Underlined as well as coloured: on the owner's own bubble the accent
+     colour IS the background, so there the link takes the bubble's own
+     foreground and the underline is the signal that carries. Its own class
+     rather than `.msg a`, which would also catch the dashed "download
+     instead" link and restyle it. */
+  .msglink{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+  .me .msglink{color:var(--primary-fg)}
+  /* The focus ring is the accent colour, which on that bubble is the
+     background it would be drawn on. */
+  .me .msglink:focus-visible{outline-color:var(--primary-fg)}
+  /* A message that is nothing but an address. Laid out the way a quote is — a
+     bar in the accent colour and two lines — because that is already this
+     file's shape for "a referenced thing inside a bubble", and a bordered
+     card inside a bordered bubble is the card-in-a-card the owner called
+     slop. Nothing is fetched to build it: every word in it comes out of the
+     address itself, so no page anybody sends him is ever requested by this
+     server or this browser before he decides to go there. */
+  .msglink-block{display:flex;gap:var(--s2);align-items:flex-start;margin:var(--s1) 0;
+                 padding-inline-start:var(--s2);text-decoration:none;
+                 border-inline-start:3px solid var(--primary)}
+  .me .msglink-block{border-inline-start-color:var(--primary-fg)}
+  .msglink-mark{flex:none;display:grid;place-items:center;margin-top:3px;opacity:.75}
+  .msglink-text{min-width:0;display:flex;flex-direction:column}
+  .msglink-host{font-weight:600;text-decoration:underline;text-underline-offset:2px;
+                overflow-wrap:anywhere}
+  /* Two lines of path and no more: the rest is in the tooltip and in the link
+     itself, and a bubble should not become a wall of query string. */
+  .msglink-path{font-size:var(--f-sm);opacity:.8;overflow-wrap:anywhere;
+                display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+                overflow:hidden}
   .typing{display:flex;gap:var(--s1);padding:var(--s3)}
   .typing i{width:6px;height:6px;border-radius:50%;background:var(--text-muted);animation:blink 1s infinite}
   .typing i:nth-child(2){animation-delay:.15s} .typing i:nth-child(3){animation-delay:.3s}
@@ -541,6 +650,12 @@
   .mrow{display:flex;gap:var(--s3);padding:var(--s2) var(--s3);border-radius:var(--r-md);
         background:var(--surface);border:1px solid var(--border);white-space:pre-wrap}
   .mrow.out{background:var(--surface-raised)}
+  /* A search result is the same row, except that it goes somewhere: the only
+     reason to read one is to open the conversation it came out of. Marked the
+     way a quote is, which is the other row in here that leads elsewhere. */
+  button.mrow{width:100%;font:inherit;color:inherit;text-align:start;cursor:pointer;
+              transition:background var(--d-fast) var(--ease)}
+  button.mrow:hover,button.mrow:focus-visible{background:var(--primary-weak)}
   .mbody{min-width:0;flex:1}
   .mrow .from{margin-bottom:var(--s1)}
   /* Said out loud, because on WhatsApp this went out under the owner's name. */
@@ -726,6 +841,49 @@
   .media-slot .note{color:inherit;opacity:.8}
   img.media,video.media{max-width:260px;width:100%;border-radius:var(--r-sm);border:1px solid var(--border);display:block}
   img.media.sticker{max-width:128px;border:0}
+  /* A photo in a thread is a thumbnail, and a thumbnail of a receipt or a
+     timetable is unreadable: it has to open. The wrapper is a real button so
+     a keyboard reaches it and the focus ring lands on the picture. */
+  .media-open{display:block;padding:0;border:0;background:none;line-height:0;
+              border-radius:var(--r-sm);cursor:zoom-in}
+
+  /* ---- one photo, at a size you can read ----
+     A <dialog> like every other overlay here, so Escape, the focus trap and
+     the return of focus come from the browser rather than from this file. */
+  .viewer{width:min(1100px,calc(100vw - var(--s6)));height:min(92dvh,900px);
+          max-width:none;max-height:none;padding:0;
+          border:1px solid var(--border);border-radius:var(--r-lg);
+          background:var(--surface);color:var(--text);box-shadow:var(--e2);
+          display:flex;flex-direction:column;overflow:hidden}
+  .viewer:not([open]){display:none}
+  .viewer::backdrop{background:rgba(8,10,12,.45)}
+  .viewer-bar{flex:none;display:flex;gap:var(--s2);align-items:center;
+              padding:var(--s2) var(--s3);border-bottom:1px solid var(--border)}
+  .viewer-what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .viewer-count{flex:none;color:var(--text-muted);font-size:var(--f-sm);white-space:nowrap}
+  .viewer-stage{position:relative;flex:1;min-height:0;display:flex}
+  /* The scroller is what makes "actual size" useful: once the picture is
+     bigger than the window, this is what pans it. */
+  /* Flex rather than a grid: a percentage height against an auto-sized grid
+     row is indefinite, and the picture came out at its own width with dead
+     space either side instead of fitted to the window. */
+  .viewer-scroll{flex:1;min-width:0;overflow:auto;display:flex;
+                 align-items:center;justify-content:center;padding:var(--s3)}
+  .viewer-img{flex:none;max-width:100%;max-height:100%;cursor:zoom-in}
+  /* Its real size, with the scroller panning it. */
+  .viewer-img.full{max-width:none;max-height:none;cursor:zoom-out}
+  .viewer-step{position:absolute;top:50%;transform:translateY(-50%);
+               width:44px;height:44px;display:grid;place-items:center;
+               border:1px solid var(--border);border-radius:var(--r-pill);
+               background:var(--surface);color:var(--text)}
+  .viewer-step:hover{background:var(--surface-raised)}
+  .viewer-prev{inset-inline-start:var(--s2)}
+  .viewer-next{inset-inline-end:var(--s2)}
+  .viewer-fail{flex:none;margin:0;padding:var(--s3);border-top:1px solid var(--border)}
+  @media (max-width:560px){
+    /* The whole screen, the way a phone shows a photo. */
+    .viewer{width:100%;height:100dvh;max-height:100dvh;margin:0;border:0;border-radius:0}
+  }
   .media-slot audio{width:260px;max-width:100%;display:block}
   .reveal{display:inline-flex;align-items:center;gap:var(--s2);margin-top:var(--s2);padding:var(--s2) var(--s3);
           font-size:var(--f-sm);font-weight:500;border-radius:var(--r-sm);
@@ -989,6 +1147,18 @@
           <strong id="msgWho" class="wa-who" dir="auto">Everyone</strong>
           <span id="msgRange" class="wa-when"></span>
         </div>
+        <!-- Searching lives here rather than over the list on the left,
+             because the left-hand field picks who and this one picks what: it
+             sits directly above the rows it changes, and the header above it
+             already says the whole scope — this person, this range, this
+             direction. Posted, never put in a query string: see the comment
+             over /api/messages/search. -->
+        <div class="wa-find">
+          <input id="msgFind" class="wa-search" type="search" autocomplete="off"
+                 placeholder="Search what was said" aria-describedby="msgFindHint"
+                 aria-label="Search what was said in these messages">
+        </div>
+        <p id="msgFindHint" class="hint">Whole words and the start of a word. Two words are a phrase.</p>
         <div id="messagesList" class="panel"></div>
       </div>
     </div>
@@ -1135,10 +1305,44 @@
       <input id="copyBtn" class="switch" type="checkbox" role="switch">
     </label>
 
+    <!-- The Held queue is the whole safety design of this thing, and until now
+         it only existed while this page happened to be open on a screen he
+         happened to be looking at. The WhatsApp message to himself leads,
+         because it needs no setup and lands in the app he is already in. -->
+    <h3 class="sheet-group">When a reply is waiting</h3>
+    <label class="srow">
+      <span class="srow-main"><span class="srow-t">A WhatsApp message to yourself</span>
+        <span class="srow-d" id="selfNotifyWhy">Checking…</span></span>
+      <input id="selfNotify" class="switch" type="checkbox" role="switch">
+    </label>
+    <label class="srow" id="pushRow" hidden>
+      <span class="srow-main"><span class="srow-t">A notification on this device</span>
+        <span class="srow-d" id="pushNotifyWhy"></span></span>
+      <input id="pushNotify" class="switch" type="checkbox" role="switch">
+    </label>
+    <!-- A switch that cannot notify anybody is a lie, and the server refuses
+         to turn it on, so when push has nowhere to go the row says why
+         instead of offering something to press. -->
+    <div class="srow" id="pushOffRow" hidden>
+      <span class="srow-main"><span class="srow-t">A notification on this device</span>
+        <span class="srow-d warn" id="pushOffWhy"></span></span>
+    </div>
+    <div class="srow">
+      <span class="srow-main"><span class="srow-t">Prove it reaches you</span>
+        <span class="srow-d">Sends one now, whatever the quiet hours and the rate limit say. A
+          route nobody has tested is a route you will not trust at 7am.</span>
+        <span class="srow-d" id="notifyTestNote" role="status" hidden></span></span>
+      <button id="notifyTest" class="ghost" type="button" disabled>Send me a test</button>
+    </div>
+
     <h3 class="sheet-group">Her voice</h3>
     <div class="srow">
       <span class="srow-main"><span class="srow-t">Learn how I text</span>
         <span class="srow-d" id="styleWhy">Checking what she is learning from…</span>
+        <!-- Its own line, not a clause on the one above: that line turns the
+             colour of a warning when she is still on the shipped examples,
+             and this is the opposite of a warning. -->
+        <span class="srow-d" id="styleFixes" hidden></span>
         <span class="srow-d" id="styleNote" role="status" hidden></span></span>
       <button id="styleLearn" class="ghost" type="button" disabled>Learn</button>
     </div>
@@ -1159,6 +1363,7 @@
     <div id="goTo" class="goto">
       <button type="button" data-goto="activity">Activity</button>
       <button type="button" data-goto="notes">Notes</button>
+      <button id="openReport" type="button">How she is doing</button>
     </div>
 
     <h3 class="sheet-group">Appearance</h3>
@@ -1171,6 +1376,60 @@
     <h3 class="sheet-group">This device</h3>
     <button id="lockBtn" class="signout" type="button">Sign out</button>
   </div>
+</dialog>
+
+<!-- Whether she is actually any good. A dialog rather than a seventh tab: the
+     rail is for the places he goes every day, the phone bar holds five and is
+     already full, and this is a considered read he does once a week — the same
+     argument that moved Activity and Notes in here. It reads only; nothing in
+     it can change what she does, which is the other reason it is not a tab.
+     Every sentence in here is the server's own wording, because the sentences
+     are the report: the counts are already inside them, and printing them a
+     second time in bordered boxes is the dashboard-of-stat-cards this project
+     does not build. -->
+<dialog id="report" class="sheet" aria-labelledby="reportTitle">
+  <div class="sheet-head">
+    <div class="sheet-id">
+      <h2 id="reportTitle">How she is doing</h2>
+      <p class="note">Counted from what she has already done.</p>
+    </div>
+    <button id="reportX" class="icon" type="button" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <div class="filters">
+      <label class="defmode" for="reportPeriod">Covering
+        <select id="reportPeriod" aria-label="What period the report covers">
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="last_7_days">Last 7 days</option>
+          <option value="last_30_days">Last 30 days</option>
+        </select>
+      </label>
+    </div>
+    <div id="reportBody"></div>
+  </div>
+</dialog>
+
+<!-- A photo at a size he can read. The thumbnail in a bubble is 260px wide,
+     which is fine for a face and useless for a receipt, a timetable or a
+     screenshot of a bill — until now the only way to read one was to pick up
+     the phone. Arrow keys move through the photos in the conversation he is
+     already looking at; nothing is fetched that the thread had not fetched
+     anyway. -->
+<dialog id="viewer" class="viewer" aria-labelledby="viewerWhat">
+  <div class="viewer-bar">
+    <strong id="viewerWhat" class="viewer-what"></strong>
+    <span id="viewerCount" class="viewer-count" role="status"></span>
+    <a id="viewerOpen" class="icon" target="_blank" rel="noopener noreferrer"
+       title="Open the original in a new tab" aria-label="Open the original in a new tab"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+    <button id="viewerX" class="icon" type="button" aria-label="Close the photo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="viewer-stage">
+    <div id="viewerScroll" class="viewer-scroll"><img id="viewerImg" class="viewer-img" alt=""></div>
+    <button id="viewerPrev" class="viewer-step viewer-prev" type="button" hidden aria-label="The photo before this one"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button id="viewerNext" class="viewer-step viewer-next" type="button" hidden aria-label="The photo after this one"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <p id="viewerFail" class="note err viewer-fail" role="status" hidden></p>
 </dialog>
 
 <!-- One menu, moved to whichever message was asked about. Built once because
@@ -1257,6 +1516,132 @@
   }
   const note = (text) => el("p", "note", text);
   const btn = (label, cls) => Object.assign(el("button", cls, label), { type: "button" });
+
+  // ---- a link somebody sent ----
+  // Message bodies are other people's words, so they are built as text nodes
+  // and real <a> elements and never as a string of HTML: nothing in here goes
+  // anywhere near innerHTML, however well escaped it would look.
+  //
+  // What counts as an address: http://, https://, and a bare www. — all three
+  // are unmistakable. Deliberately not bare domains: "config.py" and
+  // "nairobits.com" are the same shape, and a sentence turning half into a
+  // link is worse than a link he has to copy. Phone numbers and e-mail
+  // addresses are left alone too — see the report.
+  const LINK = /\bhttps?:\/\/[^\s<>"'…]+|\bwww\.[^\s<>"'…]+/gi;
+  const URL_TAIL = ".,;:!?'\"»”’]}>";
+
+  /** The address without the sentence's own punctuation on the end. A closing
+   *  bracket the address itself opened stays, which is the case a naive
+   *  pattern gets wrong both ways. */
+  function trimUrl(url) {
+    let end = url.length;
+    while (end > 0) {
+      const ch = url[end - 1];
+      if (ch === ")") {
+        const head = url.slice(0, end);
+        const opens = (head.match(/\(/g) || []).length;
+        if (opens >= (head.match(/\)/g) || []).length) break;
+      } else if (!URL_TAIL.includes(ch)) break;
+      end--;
+    }
+    return url.slice(0, end);
+  }
+
+  const linkHref = (url) => (/^www\./i.test(url) ? `https://${url}` : url);
+
+  /** Where an address actually goes, taken apart for reading.
+   *
+   *  The hostname is never shortened. Half a hostname is not a shorter truth,
+   *  it is a different claim about the destination — "benardkimani.co.ke…"
+   *  could be anything — so if something has to give it is the path. http is
+   *  said out loud for the same reason: it is the one difference between two
+   *  addresses that otherwise read identically. */
+  function linkParts(url) {
+    let parsed;
+    try { parsed = new URL(linkHref(url)); } catch { return { host: url, path: "" }; }
+    const host = parsed.hostname.replace(/^www\./i, "") + (parsed.port ? `:${parsed.port}` : "");
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    return { host: (parsed.protocol === "http:" ? "http://" : "") + host,
+             path: path === "/" ? "" : path };
+  }
+
+  const LINK_LABEL_MAX = 42;
+
+  /** An address as one line: the host, then as much path as there is room
+   *  for. The whole thing stays in href and in the tooltip. */
+  function linkLabel(url) {
+    const { host, path } = linkParts(url);
+    if (!path) return host;
+    const room = LINK_LABEL_MAX - host.length;
+    return host + (path.length <= room ? path : `${path.slice(0, Math.max(6, room - 1))}…`);
+  }
+
+  /** The whole message is one address and nothing else. */
+  function onlyLink(text) {
+    const trimmed = String(text == null ? "" : text).trim();
+    if (!trimmed || /\s/.test(trimmed)) return "";
+    const found = trimmed.match(LINK);
+    return found && found.length === 1 && found[0] === trimmed && trimUrl(trimmed) === trimmed
+      ? trimmed : "";
+  }
+
+  const EXTERNAL_GLYPH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
+
+  function linkAnchor(url, cls) {
+    const a = el("a", cls);
+    a.href = linkHref(url);
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.title = url;                 // the address in full, whatever is shown
+    return a;
+  }
+
+  /** A message that is only an address: the host on its own line, the path
+   *  under it. More of the address than the sentence form shows, not less. */
+  function linkBlock(url) {
+    const { host, path } = linkParts(url);
+    const a = linkAnchor(url, "msglink msglink-block");
+    const mark = el("span", "msglink-mark");
+    // This project's own icon, not anybody's message text.
+    mark.innerHTML = EXTERNAL_GLYPH;
+    const text = el("span", "msglink-text");
+    text.append(el("span", "msglink-host", host));
+    if (path) text.append(el("span", "msglink-path", path));
+    a.append(mark, text);
+    return a;
+  }
+
+  /** `text` as nodes, with every address a link. null when there is none, so
+   *  the caller can stay on the plain textContent path. */
+  function linkNodes(text) {
+    const source = text == null ? "" : String(text);
+    const out = document.createDocumentFragment();
+    let at = 0;
+    for (const match of source.matchAll(LINK)) {
+      const url = trimUrl(match[0]);
+      // A shortened body can cut an address in half, and a link to half an
+      // address is a dead link wearing a live one's clothes.
+      if (!url || source[match.index + url.length] === "…") continue;
+      if (match.index > at) out.append(source.slice(at, match.index));
+      const a = linkAnchor(url, "msglink");
+      a.textContent = linkLabel(url);
+      out.append(a);
+      at = match.index + url.length;
+    }
+    if (!at) return null;
+    out.append(source.slice(at));
+    return out;
+  }
+
+  /** Fill a node with a message body, links and all. */
+  function withLinks(node, text) {
+    const sole = onlyLink(text);
+    if (sole) { node.replaceChildren(linkBlock(sole)); return node; }
+    const nodes = linkNodes(text);
+    if (nodes) node.replaceChildren(nodes);
+    else node.textContent = text == null ? "" : String(text);
+    return node;
+  }
 
   // ---- auth: the server sets an HttpOnly cookie; this page never sees the password ----
   function showGate() {
@@ -1382,6 +1767,24 @@
   }
   document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
 
+  // ---- arriving from a notification ----
+  // The service worker opens /dashboard?tab=held when he taps one, and posts
+  // "show-held" when the dashboard is already open. Both land on the queue,
+  // which is the only reason the notification was sent.
+  function openHeldTab() {
+    if (app.hidden) return;        // not signed in: the gate comes first
+    show("held");
+  }
+  const askedTab = new URLSearchParams(location.search).get("tab");
+  if (VIEWS.includes(askedTab)) currentView = askedTab;
+  // Spent, so a reload later in the day is not still stuck on Held.
+  if (askedTab) window.history.replaceState(window.history.state, "", location.pathname);
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "show-held") openHeldTab();
+    });
+  }
+
   // ---- the two-column frame, in script ----
   // Every tab is a list and a detail pane. On a phone they are two screens, so
   // opening one is a navigation: it pushes a history entry, and the phone's
@@ -1488,11 +1891,14 @@
     // only place it is shown, and a learn run takes minutes, so a cached
     // answer would be a lie by the time it is looked at.
     if (!styleBusy) loadStyle();
+    loadNotify();
   };
   $("statusBtn").onclick = openSheet;
   $("profileBtn").onclick = openSheet;
   $("sheetClose").onclick = () => sheet.close();
-  for (const b of $("goTo").children) {
+  // Only the ones that are a section. "How she is doing" sits in the same
+  // group because it is one more place to go, but it opens a dialog.
+  for (const b of $("goTo").querySelectorAll("[data-goto]")) {
     b.onclick = () => { sheet.close(); show(b.dataset.goto); };
   }
   // Clicking the backdrop is the gesture everyone tries first. A dialog
@@ -1849,23 +2255,30 @@
     return d.toLocaleString([], today ? { hour: "2-digit", minute: "2-digit" }
       : { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   }
+  // Who actually sent it, and when. An auto-reply went out under the owner's
+  // name on WhatsApp, so on this screen it has to say otherwise — that is the
+  // whole point of looking. Shared with the search results, which are the same
+  // rows and must attribute them the same way.
+  const SENT_BY_NAME = { auto: ASSISTANT_NAME, held_sent: "You (approved)", dashboard: "You" };
+  function messageMeta(m) {
+    const meta = el("div", "from");
+    const out = m.direction === "out";
+    const sender = out ? (SENT_BY_NAME[m.outcome] || "You") : null;
+    const who = el("span", "who", out ? `${sender} → ${m.name || "Unknown"}` : (m.name || "Unknown"));
+    meta.append(who, ` · ${fmtTime(m.ts)}`);
+    if (SENT_BY[m.outcome]) meta.append(el("span", "by-ai", SENT_BY[m.outcome]));
+    else if (OUTCOME[m.outcome]) meta.append(` · ${OUTCOME[m.outcome]}`);
+    return meta;
+  }
+
   function renderMessages(items) {
     const wrap = el("div", "mlist");
     if (!items.length) { wrap.append(note("No messages found.")); return wrap; }
     for (const m of items) {
       const out = m.direction === "out";
       const row = el("div", `mrow ${out ? "out" : "in"}${m.outcome === "auto" ? " by-assistant" : ""}`);
-      const meta = el("div", "from");
-      // Who actually sent it. An auto-reply went out under the owner's name
-      // on WhatsApp, so on this screen it has to say otherwise — that is the
-      // whole point of looking.
-      const BY = { auto: ASSISTANT_NAME, held_sent: "You (approved)", dashboard: "You" };
-      const sender = out ? (BY[m.outcome] || "You") : null;
-      const who = el("span", "who", out ? `${sender} → ${m.name || "Unknown"}` : (m.name || "Unknown"));
-      meta.append(who, ` · ${fmtTime(m.ts)}`);
-      if (SENT_BY[m.outcome]) meta.append(el("span", "by-ai", SENT_BY[m.outcome]));
-      else if (OUTCOME[m.outcome]) meta.append(` · ${OUTCOME[m.outcome]}`);
-      const body = el("div", "", m.body);
+      const meta = messageMeta(m);
+      const body = withLinks(el("div"), m.body);
       body.dir = "auto";
       const content = el("div", "mbody");
       content.append(meta, body);
@@ -1947,6 +2360,12 @@
     const list = $("messagesList");
     paintMsgPeople();
     $("msgBack").hidden = !messagesPane.isOpen();
+    // A term in the box means every one of this function's callers — picking a
+    // person, changing the range, changing the direction, opening the tab — is
+    // really changing the scope of a search. One entry point, so none of them
+    // can quietly drop back to the unsearched list.
+    if (searchTerm().length >= MIN_TERM) return runSearch();
+    searchShowing = "";
     // What is being shown, said on this screen too: on a phone the range and
     // direction are back on the list screen, so a short answer here would
     // otherwise look like there is nothing at all.
@@ -1971,6 +2390,167 @@
   ["fRange", "fDir"].forEach((id) => ($(id).onchange = loadMessages));
   $("msgSearch").oninput = paintMsgPeople;      // local: the names are already here
   $("msgBack").onclick = () => messagesPane.back();
+
+  // ---- searching what was said ----
+  // POSTed, never put in a query string: see the comment over
+  // /api/messages/search. The snippet the server sends back is plain text with
+  // its own … markers, and it goes in as text — there is no highlighting to
+  // insert and nothing in here builds HTML out of anybody's words.
+  //
+  // The scope is whatever the two columns already say: this person, this
+  // range, this direction. So the search has no filters of its own to drift
+  // out of step with the ones on screen.
+  const MIN_TERM = 2;                  // db.search_messages refuses less
+  const SEARCH_PAGE = 50;
+  const searchTerm = () => $("msgFind").value.trim();
+  let searchShowing = "";              // the term the rows on screen belong to
+  let searchCursor = null;             // before_id for the next page; null at the end
+  let searchToken = 0;                 // only the newest answer is allowed on screen
+  let searchTimer = 0;
+
+  /** One result: the same row the message list uses, except that it leads
+   *  somewhere. A row with no chat id cannot open anything, so it is not a
+   *  button — a control that does nothing is worse than none. */
+  function hitRow(item) {
+    const out = item.direction === "out";
+    const cls = `mrow ${out ? "out" : "in"}`;
+    const row = item.chat_id ? btn("", cls) : el("div", cls);
+    // Not linkified: the snippet is an excerpt that can stop mid-address, and
+    // an <a> inside a <button> is not a thing anyway.
+    const body = el("div", "", item.snippet || item.body);
+    body.dir = "auto";
+    const content = el("div", "mbody");
+    content.append(messageMeta(item), body);
+    row.append(avatar(item.name, item.chat_id), content);
+    if (item.chat_id) {
+      row.onclick = () => { show("whatsapp"); openWa(item.chat_id, item.name); };
+    }
+    return row;
+  }
+
+  /** Nothing matched — and the reason is nearly always a rule nobody could
+   *  guess, so the screen names it rather than shrugging. The one that bites
+   *  comes first and holds whatever he typed, because it is the rule that
+   *  catches everybody: there is no searching for letters inside a word, in
+   *  any language. */
+  function noMatches(term) {
+    const box = el("div", "draft");
+    const words = term.split(/\s+/).filter(Boolean);
+    const last = words[words.length - 1] || term;
+    const row = el("div", "row");
+    box.append(el("strong", "", `Nothing matched “${term}”.`));
+    box.append(note("This looks for whole words and the beginnings of words, never for letters"
+      + ` inside one: “wat” finds “water”, but “ater” finds nothing. Try the start of “${last}”`
+      + " rather than a piece out of the middle."));
+    if (words.length > 1) {
+      box.append(note("Several words are read as a phrase: they have to sit side by side, in"
+        + " that order."));
+    }
+    if (/\p{Extended_Pictographic}/u.test(term)) {
+      box.append(note("Emoji cannot be searched. They count as the spaces between words, so a"
+        + " term made of them matches nothing."));
+    }
+    // Widest first: the range starts at Today, so "it was not today" is the
+    // likeliest reason of the lot, and whichever is likeliest is the one
+    // primary button this block gets.
+    const ways = [];
+    if ($("fRange").value !== "all") {
+      ways.push(["Look in everything stored", () => { $("fRange").value = "all"; loadMessages(); }]);
+    }
+    if (words.length > 1) {
+      ways.push([`Search just “${words[0]}”`, () => { $("msgFind").value = words[0]; loadMessages(); }]);
+    }
+    if (msgPick) ways.push(["Search everyone", () => openMsgPerson("")]);
+    ways.push(["Clear the search", () => { $("msgFind").value = ""; loadMessages(); }]);
+    ways.forEach(([label, go], i) => {
+      const b = btn(label, i === 0 ? "go" : "ghost");
+      b.onclick = go;
+      row.append(b);
+    });
+    box.append(row);
+    return box;
+  }
+
+  function moreRow(onMore) {
+    const more = btn("Show older matches", "ghost");
+    const row = el("div", "row more-matches");
+    more.onclick = () => {
+      more.disabled = true;
+      more.textContent = "Looking…";
+      onMore();
+    };
+    row.append(more);
+    return row;
+  }
+
+  function searchCount(shown, more) {
+    const span = $("fRange").value === "all" ? "stored" : rangeWords();
+    return `${shown}${more ? "+" : ""} ${shown === 1 ? "match" : "matches"} · ${span}`;
+  }
+
+  async function runSearch(older = false) {
+    const list = $("messagesList"), term = searchTerm();
+    const token = ++searchToken;
+    if (!older) {
+      searchCursor = null;
+      list.replaceChildren(note("Searching…"));
+      $("msgRange").textContent = "Searching…";
+    }
+    try {
+      const body = { term, contact: msgPick, range: $("fRange").value,
+                     direction: $("fDir").value, limit: SEARCH_PAGE };
+      if (older && searchCursor) body.before_id = searchCursor;
+      const { items, next_cursor } = await api("/api/messages/search", body);
+      if (token !== searchToken) return;        // he has typed since; this page is stale
+      searchShowing = term;
+      searchCursor = next_cursor;
+      const rows = items.map(hitRow);
+      if (older) {
+        // Appended rather than repainted, so the page he was reading does not
+        // jump back to the top under him.
+        const spent = list.querySelector(".more-matches");
+        if (spent) spent.remove();
+        list.append(...rows);
+        if (next_cursor) list.append(moreRow(() => runSearch(true)));
+        $("msgRange").textContent = searchCount(list.querySelectorAll(".mrow").length, next_cursor);
+        return;
+      }
+      if (!items.length) {
+        $("msgRange").textContent = "No matches";
+        return list.replaceChildren(noMatches(term));
+      }
+      list.replaceChildren(...rows);
+      if (next_cursor) list.append(moreRow(() => runSearch(true)));
+      $("msgRange").textContent = searchCount(items.length, next_cursor);
+    } catch (err) {
+      if (token !== searchToken) return;
+      $("msgRange").textContent = "Search failed";
+      const said = el("p", "note err", err.message);
+      if (older) {
+        const spent = list.querySelector(".more-matches");
+        if (spent) spent.replaceChildren(said);
+      } else {
+        list.replaceChildren(said);
+      }
+    }
+  }
+
+  // A keystroke is not a search: every one of them would be a round trip, and
+  // the half-typed words in between are the ones most likely to match nothing.
+  $("msgFind").oninput = () => {
+    clearTimeout(searchTimer);
+    const term = searchTerm();
+    // Back under two characters, having searched: the ordinary list comes back
+    // rather than leaving the last results sitting under an empty box.
+    if (term.length < MIN_TERM && !searchShowing) return;
+    searchTimer = setTimeout(loadMessages, 260);
+  };
+  $("msgFind").onkeydown = (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    clearTimeout(searchTimer);
+    loadMessages();
+  };
 
   // ---- held replies ----
   const REASONS = {
@@ -2016,7 +2596,7 @@
    *  board below lays the same decision out across its third column. */
   function heldCard(item) {
     const card = el("div", "draft");
-    const incoming = el("div", "from", `${heldWho(item)}: ${shortIncoming(item)}`);
+    const incoming = withLinks(el("div", "from"), `${heldWho(item)}: ${shortIncoming(item)}`);
     incoming.dir = "auto";
     const edit = el("textarea");
     edit.value = item.reply; edit.dir = "auto"; edit.rows = 2;
@@ -2126,7 +2706,7 @@
     const short = shortIncoming(item), full = item.incoming || short;
     const bubble = el("div", "msg bot");
     bubble.setAttribute("aria-current", String(chosen));
-    const body = el("div", "", whole ? full : short);
+    const body = withLinks(el("div"), whole ? full : short);
     body.dir = "auto";
     bubble.append(body);
 
@@ -2800,12 +3380,39 @@
       ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : d.toLocaleDateString();
   };
+  /** What a conversation is, when the name alone does not say it. The thread
+   *  header has room for all three words and still uses them. */
   const groupSuffix = (c) => {
     if (!c.is_group) return "";
     if (c.left) return " · you left";
     if (c.is_community_parent) return " · community";
     return " · group";
   };
+  const plainGroup = (c) => Boolean(c.is_group && !c.left && !c.is_community_parent);
+  const GROUP_GLYPH = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 19a6.2 6.2 0 0 1 12.4 0M16 4.6a3.4 3.4 0 0 1 0 6.8M17.6 13.6a6.2 6.2 0 0 1 3.6 5.4"/></svg>';
+
+  /** A conversation's name as a list row shows it: as much of the name as
+   *  fits, and a glyph when it is a group. The row does not spend the word
+   *  "· group" on it — eight characters of a name that at the narrowest grip
+   *  setting had already been cut to two, to say what thirteen pixels say.
+   *  "you left" and "community" keep their words: they are rare, and neither
+   *  is guessable from a picture. One implementation, so this list and the
+   *  forward list cannot drift apart. */
+  function nameLine(c) {
+    const line = el("div", "wa-title");
+    const name = el("span", "wa-name", (c.name || "") + (plainGroup(c) ? "" : groupSuffix(c)));
+    name.dir = "auto";
+    line.append(name);
+    if (plainGroup(c)) {
+      const glyph = el("span", "wa-glyph");
+      glyph.innerHTML = GROUP_GLYPH;
+      glyph.setAttribute("role", "img");
+      glyph.setAttribute("aria-label", "Group");
+      glyph.title = "Group";
+      line.append(glyph);
+    }
+    return line;
+  }
   // One rule wherever a count is shown, so a busy chat cannot stretch its row.
   const unreadLabel = (n) => (n > 99 ? "99+" : String(n));
 
@@ -2852,38 +3459,43 @@
     return sel;
   }
 
+  /** What the assistant does with this conversation, for a list row: a word,
+   *  or nothing at all. "Off" is the quiet majority and the absence of any
+   *  behaviour, so it is said by saying nothing — as is a group, which cannot
+   *  be answered either way. */
+  const MODE_WORD = { auto: "Direct", hold: "Ask me" };
+  function modeWord(state) {
+    const word = state && state.can_choose ? MODE_WORD[state.mode] : "";
+    if (!word) return null;
+    return el("span", `wa-auto${state.mode === "auto" ? "" : " waits"}`, word);
+  }
+
   function waChatRow(c) {
-    // A row, not a button: it carries its own AI switch, and a control inside
-    // a button is neither valid nor reachable by keyboard. Choosing who the
-    // assistant answers used to mean opening each conversation in turn.
+    // A row, not a button: the unread count inside it is its own control, and
+    // a button inside a button is neither valid nor reachable by keyboard.
     const row = el("div", "wa-row");
     row.dataset.chat = c.id;
     row.setAttribute("aria-current", String(c.id === waChat));
 
     const open = btn("", "wa-openrow");
     const main = el("div", "wa-main");
-    const name = el("span", "wa-name", c.name + groupSuffix(c));
     const preview = el("span", "wa-prev", (c.from_me ? "You: " : "") + (c.preview || "—"));
-    name.dir = preview.dir = "auto";
-    main.append(name, preview);
+    preview.dir = "auto";
+    main.append(nameLine(c), preview);
     const side = el("div", "wa-side");
     side.append(el("span", "wa-when", c.ts ? when(c.ts) : ""));
-    if (c.unread) side.append(markReadButton(c));
+    // One line for both, so a row with an unread count is exactly as tall as
+    // a row without one.
+    const foot = el("div", "wa-foot");
+    const word = modeWord(c.assistant);
+    if (word) foot.append(word);
+    if (c.unread) foot.append(markReadButton(c));
+    side.append(foot);
     open.append(avatar(c.name, c.id), main, side);
     open.onclick = () => openWa(c.id, c.name);
-    open.setAttribute("aria-label", `Open the conversation with ${c.name}`);
+    open.setAttribute("aria-label", `Open the conversation with ${c.name}`
+      + (word ? `. The assistant: ${word.textContent}` : ""));
     row.append(open);
-
-    const state = c.assistant || {};
-    if (state.can_choose) {
-      row.append(aiPicker(state.mode, `What the assistant does with ${c.name}`,
-        async (mode) => {
-          const now = await setAssistantFor(c.id, c.name, mode);
-          if (c.id === waChat) showAssistantToggle({ ...c, assistant: now }, state.mode);
-        }));
-    } else {
-      row.append(el("span", "wa-ai muted", "no replies to groups"));
-    }
     return row;
   }
 
@@ -2919,6 +3531,112 @@
     return null;
   }
 
+  // ---- one photo, at a size you can read ----
+  // A 260px thumbnail is fine for a face and useless for a receipt, a
+  // timetable or a screenshot of a bill, which is most of what gets sent. The
+  // arrows move through the photos in the conversation already on screen, so
+  // nothing here fetches anything the thread had not already asked for.
+  const viewer = $("viewer"), viewerImg = $("viewerImg");
+  const CAN_VIEW = new Set(["image", "sticker"]);
+  const canView = (m) => CAN_VIEW.has(m.render_as) && !m.view_once;
+  let photos = [], photoAt = 0, viewerOpener = null;
+
+  /** The photos in this thread, in the order they are on screen, so the
+   *  arrows move the way the eye does. Rebuilt on every thread load; a poll
+   *  that lands while the viewer is open keeps it on the same picture. */
+  function collectPhotos(messages, chatId) {
+    const showing = viewer.open && photos[photoAt] ? photos[photoAt].id : "";
+    photos = messages.filter(canView).map((m) => ({
+      id: m.id, kind: m.kind || "Photo", src: mediaUrl(chatId, m.id),
+    }));
+    if (!showing) return;
+    if (!photos.length) return viewer.close();
+    const at = photos.findIndex((p) => p.id === showing);
+    photoAt = at >= 0 ? at : Math.min(photoAt, photos.length - 1);
+    paintViewerChrome();
+  }
+
+  function paintViewerChrome() {
+    const many = photos.length > 1;
+    $("viewerCount").textContent = many ? `${photoAt + 1} of ${photos.length}` : "";
+    $("viewerPrev").hidden = !many;
+    $("viewerNext").hidden = !many;
+  }
+
+  function paintViewer() {
+    const shot = photos[photoAt];
+    if (!shot) return;
+    $("viewerFail").hidden = true;
+    viewerImg.hidden = false;
+    viewerImg.classList.remove("full");
+    viewerImg.alt = shot.kind;
+    viewerImg.src = shot.src;
+    $("viewerWhat").textContent = shot.kind;
+    $("viewerOpen").href = shot.src;
+    paintViewerChrome();
+    $("viewerScroll").scrollTo(0, 0);
+  }
+
+  function stepViewer(by) {
+    if (photos.length < 2) return;
+    photoAt = (photoAt + by + photos.length) % photos.length;
+    paintViewer();
+  }
+
+  function openViewer(msgId, opener) {
+    const at = photos.findIndex((p) => p.id === msgId);
+    if (at < 0) return;
+    photoAt = at;
+    viewerOpener = opener || null;
+    paintViewer();
+    if (!viewer.open) viewer.showModal();
+  }
+
+  // The same honesty the bubble already offers: the route answers 404 when
+  // the message is gone from the phone, and 502 when the bridge is down, and
+  // an <img> cannot read either — so it says what it knows and hands him the
+  // one thing that can say more.
+  viewerImg.onerror = () => {
+    viewerImg.hidden = true;
+    const fail = $("viewerFail");
+    fail.hidden = false;
+    fail.textContent = "This one wouldn’t load. It may have been deleted on the phone, or the"
+      + " bridge may be unreachable — “Open the original” will say which.";
+  };
+  viewerImg.onload = () => { $("viewerFail").hidden = true; viewerImg.hidden = false; };
+  // One press for its real size, another to fit it back; the scroller pans it
+  // once it is bigger than the window. A phone's own pinch-zoom works on top
+  // of this, because nothing here locks the viewport.
+  viewerImg.onclick = () => viewerImg.classList.toggle("full");
+  $("viewerPrev").onclick = () => stepViewer(-1);
+  $("viewerNext").onclick = () => stepViewer(1);
+  $("viewerX").onclick = () => viewer.close();
+  viewer.onclick = (event) => { if (event.target === viewer) viewer.close(); };
+  viewer.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    stepViewer(event.key === "ArrowLeft" ? -1 : 1);
+  });
+  viewer.addEventListener("close", () => {
+    viewerImg.removeAttribute("src");        // stop a large picture sitting in memory
+    // The browser hands focus back on its own, but only while the opener is
+    // still in the document — and a poll can replace the thread underneath.
+    if (viewerOpener && viewerOpener.isConnected) viewerOpener.focus();
+    viewerOpener = null;
+  });
+
+  /** The picture, wrapped in something a keyboard can reach. */
+  function viewButton(picture, m) {
+    const open = btn("", "media-open");
+    open.setAttribute("aria-label", `View the ${(m.kind || "photo").toLowerCase()} full size`);
+    open.append(picture);
+    open.onclick = (event) => {
+      event.stopPropagation();          // not a press on the bubble behind it
+      openViewer(m.id, open);
+    };
+    return open;
+  }
+
   // What the server reports in `sent_by`, in words. A message with no entry
   // here is one the owner sent themselves — from their phone, or from the box
   // at the bottom of this page — and saying so on every one of those would be
@@ -2930,19 +3648,30 @@
 
   const QUOTE_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h7a9 9 0 0 1 9 9v2"/></svg>';
 
-  /** Who said the message being quoted, in words the owner recognises. The
-   *  bridge can only give us digits: it knows the author's number, not what
-   *  the owner calls them. */
-  function quotedWho(q, chatName) {
+  /** Who said the message being quoted, in words the owner recognises.
+   *
+   *  The same ladder app/controls.py's readable_who and app/groups.py's
+   *  speaker_label walk: a saved name, then a real number, then a word —
+   *  never the local part of an id. This used to print `+${q.author}`, which
+   *  turned an @lid privacy id into "+109989968511088": fifteen opaque digits
+   *  wearing a plus sign, matching nothing the owner has ever seen.
+   *
+   *  A direct chat names nobody, because there is exactly one other person in
+   *  it and the header above the thread already names them.
+   *
+   *  A group says "Someone". The bridge strips the domain off the author
+   *  before it leaves (whatsapp-bridge/wa_read.js: `author: idParts(who).user`),
+   *  so by the time it arrives here a phone number and a privacy id are the
+   *  same thing — a run of digits — and nothing on this page can tell them
+   *  apart. Showing the owner a number that is not one is worse than not
+   *  naming the speaker, which is the call speaker_label makes too. */
+  function quotedWho(q, chatName, isGroup) {
     if (q.from_me) return "You";
-    // In a group WhatsApp names the author, and a number is the most we can
-    // honestly say about them. In a direct chat it names nobody, because
-    // there is only one other person — the one already named at the top.
-    if (q.author) return `+${q.author}`;
+    if (isGroup) return "Someone";
     return chatName || "Them";
   }
 
-  function quoteBlock(m) {
+  function quoteBlock(m, chatId) {
     const q = m.quoted;
     const box = btn("", "quote");
     // Two names for the same message: the serialized id, when the quote
@@ -2950,7 +3679,10 @@
     // one. Either may be the name this thread knows it by.
     box.dataset.qid = q.id || "";
     box.dataset.qstanza = q.stanza_id || "";
-    const who = el("b", "", quotedWho(q, $("waWho").textContent));
+    // The same test showComposerFor uses, so "is this a group" has one answer.
+    const chat = waChats.find((c) => c.id === chatId);
+    const isGroup = Boolean((chat && chat.is_group) || String(chatId || "").endsWith("@g.us"));
+    const who = el("b", "", quotedWho(q, $("waWho").textContent, isGroup));
     const what = el("span", "", q.kind && q.preview ? `${q.kind} · ${q.preview}`
                                 : q.kind || q.preview || "Message");
     what.dir = "auto";
@@ -3190,7 +3922,7 @@
       const row = el("div", "wa-row");
       const open = btn("", "wa-openrow");
       const main = el("div", "wa-main");
-      main.append(el("span", "wa-name", c.name + groupSuffix(c)));
+      main.append(nameLine(c));
       open.append(avatar(c.name, c.id), main);
       open.setAttribute("aria-label", `Forward to ${c.name}`);
       open.onclick = () => {
@@ -3288,7 +4020,7 @@
     armSwipeReply(bubble, m);
     // The quote comes first, as it does in WhatsApp: it is the context for
     // everything under it.
-    if (m.quoted) bubble.append(quoteBlock(m));
+    if (m.quoted) bubble.append(quoteBlock(m, chatId));
     // A sticker is shown, not announced: WhatsApp puts no word above one, and
     // "Sticker" written over the picture of a sticker is the kind of label a
     // person reads once and never again. `kind` itself stays — the alt text,
@@ -3300,7 +4032,9 @@
     const bigEmoji = Boolean(m.emoji_only && !m.quoted);
     if (bigEmoji) bubble.classList.add("emoji-only");
     if (m.body) {
-      const body = el("div", bigEmoji ? "big-emoji" : "", m.body);
+      // A link in what somebody sent is a real link: on a phone the only other
+      // way to use one is to retype it.
+      const body = withLinks(el("div", bigEmoji ? "big-emoji" : ""), m.body);
       body.dir = "auto";
       bubble.append(body);
     } else if (!m.kind) {
@@ -3322,7 +4056,9 @@
           link.download = "";
           holder.replaceChildren(link);
         };
-        holder.replaceChildren(node);
+        // A photo you can only see at thumbnail size is a photo you have to
+        // pick up the phone to read.
+        holder.replaceChildren(canView(m) ? viewButton(node, m) : node);
       };
       if (m.view_once) {
         // Opening one of these is not reversible: WhatsApp shows the sender it
@@ -3672,6 +4408,9 @@
       // then saved a contact called "undefined".
       $("waWho").textContent = (chat.name || waChat.split("@")[0]) + groupSuffix(chat);
       showAssistantToggle(chat, data.default_mode);
+      // Before the bubbles, so a press on one of them already knows what else
+      // the arrows can reach.
+      collectPhotos(messages, chat.id);
       panel.replaceChildren(...(messages.length
         ? messages.map((m) => waBubble(m, chat.id))
         : [note("Nothing here yet.")]));
@@ -4315,6 +5054,16 @@
           ? "Nothing is teaching her how you text yet, so she is guessing at it."
           : `${s.lines} ${s.lines === 1 ? "line" : "lines"} of your own, learned`
             + ` ${s.learned_at ? since(s.learned_at) : "at some point"}.`;
+    // Style pairs she kept because he rewrote the draft she offered, counted
+    // apart from the rest. It is the one number here that says she is getting
+    // better rather than merely set up, so it is said out loud — and it is
+    // true even while the lines above are still the shipped examples.
+    const fixes = $("styleFixes"), corrections = (s && s.corrections) || 0;
+    fixes.hidden = !corrections;
+    fixes.textContent = corrections
+      ? `She is also learning from ${corrections} ${corrections === 1 ? "reply" : "replies"}`
+        + " you rewrote before sending, so your edits are teaching her too."
+      : "";
     styleLearn.textContent = problem ? "Learn from my chats" : "Learn again";
     styleLearn.className = problem && s ? "go" : "ghost";
     styleLearn.disabled = styleBusy;
@@ -4355,6 +5104,286 @@
       await loadStyle();        // the row and the button come back from the truth
     }
   };
+
+  // ---- being told a reply is waiting ----
+  // The queue only mattered while this page happened to be open. Two routes,
+  // both off until he turns one on, both rendered from /api/notify rather than
+  // from anything remembered here: a switch that says "on" while the server
+  // disagrees is the exact failure this is meant to end.
+  const selfNotify = $("selfNotify"), pushNotify = $("pushNotify");
+  let notifyState = null, notifyBusy = false;
+
+  /** Whether this browser could take a notification at all. Push needs a
+   *  service worker, which needs a secure context — so over plain http on the
+   *  home network there is nothing to offer, whatever the server's keys say. */
+  const pushHere = () =>
+    "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  async function workerReady() {
+    try { return await navigator.serviceWorker.register("/sw.js"); }
+    catch { return null; }
+  }
+
+  /** base64url to bytes, which is the only form pushManager.subscribe takes. */
+  function keyBytes(base64url) {
+    const padded = base64url.replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+    return Uint8Array.from(raw, (ch) => ch.charCodeAt(0));
+  }
+
+  const quietClause = (q) => !q || !q.window ? ""
+    : ` Nothing is sent during your quiet hours (${q.window})${q.quiet_now ? ", and it is quiet hours now" : ""}.`;
+
+  function renderNotify(state) {
+    notifyState = state;
+    const selfWhy = $("selfNotifyWhy"), pushWhy = $("pushNotifyWhy");
+    if (!state) {
+      selfWhy.className = "srow-d warn";
+      selfWhy.textContent = "Whether you would be told could not be read just now.";
+      selfNotify.disabled = true;
+      $("pushRow").hidden = true;
+      $("pushOffRow").hidden = true;
+      $("notifyTest").disabled = true;
+      return;
+    }
+    const every = state.self_message.at_most_every_minutes;
+    selfNotify.disabled = notifyBusy;
+    // Not while a change is in flight: turning push on asks the browser for
+    // permission, and a switch that flicked back to off under his finger
+    // while that prompt was up would read as a refusal that had not happened.
+    if (!notifyBusy) selfNotify.checked = state.self_message.enabled;
+    selfWhy.className = "srow-d";
+    selfWhy.textContent = "It lands in your own WhatsApp chat, so it reaches the app you are"
+      + ` already in. One message at most every ${every} ${every === 1 ? "minute" : "minutes"},`
+      + " carrying a count — never one per reply." + quietClause(state.quiet_hours);
+
+    // Push: a switch only where it could actually reach somebody.
+    const push = state.push;
+    const blocked = !pushHere()
+      ? "This browser cannot take notifications here: they need a service worker, which only"
+        + " runs over https or on this machine itself."
+      : Notification.permission === "denied"
+        ? "Your browser has blocked notifications for this page. Allow them in its site settings"
+          + " and this switch comes back."
+        : push.configured ? "" : push.reason;
+    $("pushRow").hidden = Boolean(blocked);
+    $("pushOffRow").hidden = !blocked;
+    if (blocked) {
+      // The channel is a setting for every device, so if it is on, the others
+      // are still being reached — only this one cannot be.
+      $("pushOffWhy").textContent = blocked
+        + (push.enabled && push.devices
+          ? ` ${push.devices} other ${push.devices === 1 ? "device is" : "devices are"} still being notified.`
+          : "");
+    } else {
+      pushNotify.disabled = notifyBusy;
+      if (!notifyBusy) pushNotify.checked = push.enabled;
+      const n = push.devices;
+      pushWhy.className = "srow-d";
+      pushWhy.textContent = "It reaches you with this page closed, which is the only route that"
+        + " does. The notification itself carries nothing about the conversation."
+        + (n ? ` ${n} ${n === 1 ? "device is" : "devices are"} signed up.` : "")
+        + quietClause(state.quiet_hours);
+    }
+    // Not disabled when nothing is on: the server answers that in a sentence
+    // written for him, which is more use than a button he cannot press and no
+    // explanation of why.
+    $("notifyTest").disabled = notifyBusy;
+  }
+
+  async function loadNotify() {
+    try {
+      const state = await api("/api/notify");
+      renderNotify(state);
+      // Push is on, this browser has already been allowed, but it has no
+      // subscription — a cleared site, a new profile, a subscription the push
+      // service replaced. Put it back without asking him anything.
+      if (state.push.configured && state.push.enabled && pushHere()
+          && Notification.permission === "granted") {
+        const reg = await workerReady();
+        const already = reg && await reg.pushManager.getSubscription();
+        if (reg && !already) await subscribeHere(reg, state.push.public_key);
+      }
+    } catch { renderNotify(null); }
+  }
+
+  async function subscribeHere(reg, publicKey) {
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: keyBytes(publicKey),
+    });
+    await api("/api/notify/subscribe", sub.toJSON());
+    return sub;
+  }
+
+  /** Both switches go through here: the server is asked, and what comes back
+   *  is what the row shows. A switch that moved on its own while the server
+   *  refused would be a promise this page cannot keep. */
+  async function setChannel(which, on, trouble) {
+    notifyBusy = true;
+    renderNotify(notifyState);
+    try {
+      if (trouble) throw new Error(trouble);
+      const state = await api("/api/notify/channels", { [which]: on });
+      notifyBusy = false;
+      renderNotify(state);
+      bubble("bot", on
+        ? (which === "push" ? "This device will be notified when a reply is waiting."
+                            : "You will get a WhatsApp message when a reply is waiting.")
+        : (which === "push" ? "Notifications on your devices are off."
+                            : "I will stop sending you a WhatsApp message about the queue."));
+    } catch (err) {
+      bubble("bot", err.message, true);
+      notifyBusy = false;
+      // Back to what the server last said, switch and all: a switch that
+      // stayed where he put it while the server refused would be this page
+      // promising something it cannot do.
+      renderNotify(notifyState);
+      const why = which === "push" ? $("pushNotifyWhy") : $("selfNotifyWhy");
+      why.className = "srow-d warn";
+      why.textContent = err.message;
+    }
+  }
+
+  selfNotify.onchange = () => setChannel("self_message", selfNotify.checked);
+
+  // Turning push on is three things, and the server refuses the switch while
+  // any of them is missing: a registered worker, the browser's permission, and
+  // a subscription it knows about. Asked for in that order, and the switch
+  // goes back if any of them says no.
+  pushNotify.onchange = async () => {
+    const on = pushNotify.checked;
+    if (!on) return setChannel("push", false);
+    notifyBusy = true;
+    renderNotify(notifyState);
+    let trouble = "";
+    try {
+      if (!notifyState || !notifyState.push.public_key) {
+        trouble = "This server has no key to sign notifications with yet.";
+      } else if (await Notification.requestPermission() !== "granted") {
+        trouble = "Your browser did not allow notifications for this page, so there is nothing"
+          + " to turn on yet.";
+      } else {
+        // Permission is asked first and the worker registered after, so the
+        // ask happens while the press that started it is still fresh: Chrome
+        // refuses a prompt whose gesture has gone stale.
+        const reg = await workerReady();
+        if (!reg) trouble = "This browser would not start the worker that receives notifications.";
+        else await subscribeHere(reg, notifyState.push.public_key);
+      }
+    } catch (err) {
+      trouble = `This device could not be signed up: ${err.message}`;
+    }
+    notifyBusy = false;
+    await setChannel("push", true, trouble);
+  };
+
+  // A route nobody has proved is a route he will not trust at 7am, so this
+  // says what each one actually did rather than "sent".
+  function testSaid(r) {
+    const parts = [];
+    const on = notifyState || { self_message: {}, push: {} };
+    if (on.self_message.enabled) {
+      parts.push(r.self_message_sent ? "the WhatsApp message to you went out"
+        : "the WhatsApp message could not be sent — the bridge may not be linked");
+    }
+    if (on.push.enabled) {
+      parts.push(r.push_sent ? `${r.push_sent} ${r.push_sent === 1 ? "device" : "devices"} were notified`
+        : `no device could be reached${r.push_forgotten ? ` (${r.push_forgotten} had thrown the subscription away)` : ""}`);
+    }
+    const line = parts.join(", and ");
+    return line ? `${line[0].toUpperCase()}${line.slice(1)}.` : "Nothing was turned on to test.";
+  }
+
+  $("notifyTest").onclick = async () => {
+    const said = $("notifyTestNote"), button = $("notifyTest");
+    button.disabled = true;
+    said.hidden = false;
+    said.className = "srow-d";
+    said.textContent = "Sending one now…";
+    try {
+      const r = await api("/api/notify/test", {});
+      const on = notifyState || { self_message: {}, push: {} };
+      said.textContent = testSaid(r);
+      const failed = (on.self_message.enabled && !r.self_message_sent)
+        || (on.push.enabled && !r.push_sent);
+      said.className = `srow-d${failed ? " warn" : ""}`;
+      // Devices can be dropped by the test itself, so the row is read again.
+      loadNotify();
+    } catch (err) {
+      said.className = "srow-d warn";
+      said.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  // ---- how she is doing ----
+  // Opened from the sheet, closed again by Escape or the backdrop like every
+  // other dialog here. Read once, on open and on a change of period: a report
+  // that refreshed under him while he was reading it would move the line he
+  // was on.
+  const reportDialog = $("report");
+  $("openReport").onclick = () => {
+    sheet.close();
+    if (!reportDialog.open) reportDialog.showModal();
+    loadReport();
+  };
+  $("reportX").onclick = () => reportDialog.close();
+  reportDialog.onclick = (event) => { if (event.target === reportDialog) reportDialog.close(); };
+  $("reportPeriod").onchange = loadReport;
+
+  function reportSection(title, sentence, extra) {
+    const parts = [el("h3", "sheet-group", title), el("p", "", sentence)];
+    if (extra) parts.push(extra);
+    return parts;
+  }
+
+  function renderReport(r) {
+    const body = $("reportBody");
+    const parts = [];
+    // The queue first, and it is the only thing in here that can be acted on.
+    const queue = [];
+    if (r.queue.waiting) {
+      const go = btn("Open the queue", "go");
+      go.onclick = () => { reportDialog.close(); show("held"); };
+      const row = el("div", "row");
+      row.append(go);
+      queue.push(row);
+    }
+    parts.push(...reportSection("Waiting for you", r.queue.sentence, queue[0]));
+    parts.push(...reportSection("What came in", r.messages.sentence));
+    parts.push(...reportSection("What you did with her drafts", r.drafts.sentence));
+
+    // The one list of numbers worth printing: the sentence names the commonest
+    // reason, and the rest of them are what he would actually change.
+    let reasons = null;
+    if (r.holds.reasons.length > 1) {
+      reasons = el("ul", "rep-why");
+      for (const { reason, count } of r.holds.reasons) {
+        const line = el("li");
+        line.append(el("span", "", reason), el("b", "", String(count)));
+        reasons.append(line);
+      }
+    }
+    parts.push(...reportSection("Why she held things", r.holds.sentence, reasons));
+
+    const trend = el("p", "rep-dir", r.trend.sentence);
+    trend.dataset.dir = r.trend.direction;
+    // The words already say which way it went; the dot is the second signal,
+    // never the only one.
+    trend.prepend(el("span", "statdot"));
+    parts.push(el("h3", "sheet-group", "Against the period before"), trend);
+
+    parts.push(el("p", "note rep-foot", r.window.sentence));
+    body.replaceChildren(...parts);
+  }
+
+  async function loadReport() {
+    const body = $("reportBody");
+    body.replaceChildren(note("Reading…"));
+    try { renderReport(await api(`/api/quality?period=${$("reportPeriod").value}`)); }
+    catch (err) { body.replaceChildren(el("p", "note err", err.message)); }
+  }
 
   // ---- dictation: record, transcribe on the server (Whisper) ----
   const micBtn = $("mic"), langBtn = $("lang");
