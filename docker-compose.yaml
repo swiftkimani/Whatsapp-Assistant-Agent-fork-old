@@ -20,8 +20,22 @@ services:
 
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
-      ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-medium}
-      ANTHROPIC_MAX_TOKENS: ${ANTHROPIC_MAX_TOKENS:-4096}
+      # These two have to move together, and this pair did not. Thinking tokens
+      # are drawn from max_tokens, so raising effort without raising the ceiling
+      # buys reasoning that eats the budget the reply needed: the call returns a
+      # thinking block and no text, _parse_answer reads that as malformed, and
+      # verify() holds it. The failure is silent — it looks like the model
+      # choosing to hold, not like running out of room. app/llm.py defaults to
+      # high/8192 for exactly this reason and these defaults contradicted it at
+      # medium/4096, so the deployed service was the cheaper, dumber one and
+      # anyone who set EFFORT=high in Coolify got the truncation instead.
+      #
+      # high because the replies worth sending are the ones that needed the
+      # sender's history, the schedule and the redirect rules weighed together.
+      # Only tokens actually generated are billed, so the 8192 is a ceiling,
+      # not a cost.
+      ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-high}
+      ANTHROPIC_MAX_TOKENS: ${ANTHROPIC_MAX_TOKENS:-8192}
 
       # argon2id only. The plaintext DASHBOARD_PASSWORD is for a dashboard on
       # loopback; this one is on the internet.
@@ -135,6 +149,17 @@ services:
       # Most contacts one "Sync from WhatsApp" may add. That file is the list
       # the dashboard may message, so a sync widens it; this bounds how far.
       CONTACTS_SYNC_LIMIT: ${CONTACTS_SYNC_LIMIT:-500}
+      # A burst of messages from one person is answered as a single turn, once
+      # that chat has gone quiet for BURST_QUIET_MS. Two reasons, and the
+      # second is the important one: a reply per message answered whichever
+      # message arrived first while the live question was still being typed,
+      # and it put several sends on the account inside one second, which is
+      # what automated messaging looks like from WhatsApp's side. Defaults live
+      # in whatsapp-bridge/burst.js; BURST_QUIET_MS=0 restores one reply per
+      # message if this ever feels too slow in use.
+      BURST_QUIET_MS: ${BURST_QUIET_MS:-}
+      BURST_CEILING_MS: ${BURST_CEILING_MS:-}
+      BURST_MAX_MESSAGES: ${BURST_MAX_MESSAGES:-}
       # Set to link by typed code rather than by scanning a QR off a log viewer.
       PAIRING_NUMBER: ${PAIRING_NUMBER:-}
       # Bump when linking starts failing: WhatsApp refuses new device links on
