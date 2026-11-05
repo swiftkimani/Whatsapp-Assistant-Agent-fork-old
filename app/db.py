@@ -61,6 +61,15 @@ def init() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, chat_id TEXT, role TEXT, content TEXT)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id)")
         c.execute("CREATE TABLE IF NOT EXISTS contact_modes (name TEXT PRIMARY KEY, mode TEXT NOT NULL)")
+        # One row per group the owner has decided about. Keyed on the chat id
+        # and not on a name, because a group has no contacts.json entry to
+        # hang a name on: contact_modes keys on the name, which is why it
+        # cannot hold these. Two columns because there are two questions —
+        # when she may answer at all, and whether the answer goes out by
+        # itself — and conflating them would mean a group could not be set to
+        # "only when somebody is talking to her, and show me first".
+        c.execute("""CREATE TABLE IF NOT EXISTS group_modes (
+            chat_id TEXT PRIMARY KEY, mode TEXT NOT NULL, delivery TEXT NOT NULL)""")
         c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         c.execute("""CREATE TABLE IF NOT EXISTS message_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, chat_id TEXT, name TEXT,
@@ -246,6 +255,58 @@ def get_mode(name: str | None) -> str:
     with _db() as c:
         row = c.execute("SELECT mode FROM contact_modes WHERE name = ?", (name.strip().lower(),)).fetchone()
         return row["mode"] if row else default_mode()
+
+
+# ---- per-group settings: how she behaves in one group chat ----
+# Deliberately separate from the per-contact modes above. The words differ
+# because the questions differ: a contact is "auto | hold | ignore", a group is
+# "never | only when addressed | every message" crossed with "send it | show me
+# first". app/groups.py owns the vocabulary and the defaults; this only stores
+# them, and normalises on the way out so a value edited by hand into the
+# database cannot be the thing that switches a group on.
+
+def group_policy(chat_id: str) -> tuple[str, str]:
+    """This group's (mode, delivery). A group nobody has decided about comes
+    back as the safe pair, which is "leave alone"."""
+    from app import groups
+    if not chat_id:
+        return groups.DEFAULT_MODE, groups.DEFAULT_DELIVERY
+    with _db() as c:
+        row = c.execute("SELECT mode, delivery FROM group_modes WHERE chat_id = ?",
+                        (chat_id,)).fetchone()
+    if not row:
+        return groups.DEFAULT_MODE, groups.DEFAULT_DELIVERY
+    return groups.normalise_mode(row["mode"]), groups.normalise_delivery(row["delivery"])
+
+
+def set_group_policy(chat_id: str, mode: str, delivery: str) -> None:
+    """Record a decision about one group. Both values are validated here rather
+    than coerced, because a misspelt mode that silently became "open" would be
+    the worst possible failure in this table."""
+    from app import groups
+    if not chat_id:
+        raise ValueError("a group needs a chat id")
+    if mode not in groups.MODES:
+        raise ValueError(f"bad group mode: {mode}")
+    if delivery not in groups.DELIVERY:
+        raise ValueError(f"bad group delivery: {delivery}")
+    with _db() as c:
+        c.execute("INSERT INTO group_modes (chat_id, mode, delivery) VALUES (?, ?, ?) "
+                  "ON CONFLICT(chat_id) DO UPDATE SET mode = excluded.mode, "
+                  "delivery = excluded.delivery", (chat_id, mode, delivery))
+
+
+def all_group_policies() -> dict[str, dict[str, str]]:
+    """Every group that has been decided about, for the dashboard to render."""
+    with _db() as c:
+        return {r["chat_id"]: {"mode": r["mode"], "delivery": r["delivery"]}
+                for r in c.execute("SELECT chat_id, mode, delivery FROM group_modes")}
+
+
+def clear_group_policy(chat_id: str) -> None:
+    """Forget a group, so it follows the default again — which is silence."""
+    with _db() as c:
+        c.execute("DELETE FROM group_modes WHERE chat_id = ?", (chat_id,))
 
 
 def all_modes() -> dict[str, str]:

@@ -14,6 +14,7 @@ const { BurstBuffer } = require("./burst");
 const { cleanName } = require("./contacts_sync");
 const { readContacts } = require("./bridge_api");
 const { startBridgeApi } = require("./bridge_api");
+const { addressedIn } = require("./group_mentions");
 
 // Load the SAME .env file the Python backend uses, from the project root
 // (one level up from whatsapp-bridge/).
@@ -441,6 +442,22 @@ async function answerBurst(turn) {
       mimetype: turn.media ? turn.media.mimetype : null,
       // The contact's WhatsApp display name, once for the whole burst.
       push_name: turn.pushName,
+      // ---- groups ----
+      is_group: String(turn.chatId).endsWith("@g.us"),
+      // A burst is addressed if any message in it addressed her: somebody
+      // asking "Arianna, uko?" and then adding "ni urgent" has addressed her
+      // once, and the second line does not undo it.
+      addressed: turn.messages.some((m) => m && m.addressed),
+      addressed_how: (turn.messages.find((m) => m && m.addressed) || {}).how || "",
+      sender_name: turn.pushName,
+      // The burst un-joined, so the backend can say who said what. A direct
+      // chat ignores this; a group cannot do without it.
+      turns: turn.messages.map((m) => ({
+        sender_name: m.pushName || "",
+        body: String((m && m.body) || ""),
+        number: m.number || "",
+        sender_id: m.senderId || "",
+      })),
     };
     console.log(`[burst] ${anon(turn.chatId)} ${turn.count} message(s) folded into one turn ` +
                 `(${turn.reason}) type=${payload.type}`);
@@ -500,6 +517,27 @@ async function sendAnswer(turn, data) {
   }
 }
 
+// Every id form the linked account is known by. A group may @mention her as
+// "@c.us" or as an "@lid" privacy id, and wa_read.js's sameAccount()
+// deliberately refuses to compare digits across those two namespaces -- a lid
+// is not a phone number with a different suffix. So both have to be held, or a
+// mention in the other form simply does not register. The c.us form is on
+// client.info; the lid is learned the first time one of her own messages comes
+// back with an author on it.
+const ownerIds = new Set();
+function rememberOwnerId(id) {
+  const value = String(id || "");
+  if (value) ownerIds.add(value);
+}
+client.on("ready", () => {
+  rememberOwnerId(client.info && client.info.wid ? client.info.wid._serialized : "");
+});
+client.on("message_create", (msg) => {
+  // Her own message in a group carries the id the group knows her by, which is
+  // the one form client.info cannot tell us.
+  if (msg.fromMe) rememberOwnerId(msg.author || (msg.id && msg.id.participant));
+});
+
 client.on("message", async (msg) => {
   try {
     if (msg.fromMe) {
@@ -545,6 +583,14 @@ client.on("message", async (msg) => {
       media,
       number,
       pushName: await displayName(contact),
+      // Who actually spoke. In a group msg.from is the room and msg.author is
+      // the person, so without this every line in a burst is attributed to
+      // whoever happened to send the last one.
+      senderId: msg.author || msg.from,
+      // Whether anybody was talking to her: an @mention, her name as a whole
+      // word, or a reply to something she sent. All three live on the message
+      // rather than in its text, so this is the only place that can see them.
+      ...addressedIn(msg, { me: [...ownerIds] }),
     });
   } catch (err) {
     console.error("Error handling message:", err.stack || err);

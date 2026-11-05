@@ -1,6 +1,7 @@
 import hmac
 import os
 import re
+import time
 
 from dotenv import load_dotenv
 
@@ -11,10 +12,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import db, live, quiet_hours
+from app import db, groups, live, quiet_hours
 from app.agent_graph import run_agent
 from app.approvals import router as approvals_router
 from app.assistant import router as assistant_router
+from app.style_learning import router as style_router
 import httpx
 
 from app import bridge
@@ -31,6 +33,7 @@ app.include_router(dashboard_router)
 app.include_router(assistant_router)
 app.include_router(approvals_router)
 app.include_router(controls_router)
+app.include_router(style_router)
 db.init()
 
 REPLY_WITH_VOICE = os.getenv("REPLY_WITH_VOICE", "false") == "true"
@@ -56,6 +59,16 @@ CONVERSATION_ID = re.compile(r"^\d[\d:-]*@(c\.us|lid|g\.us)$")
 def is_allowed(contact_id: str, number: str | None = None) -> bool:
     if not CONVERSATION_ID.match(contact_id or ""):
         return False
+    # ALLOW_GROUPS is the outer of two gates, and it is deliberately coarse:
+    # "do I want this assistant anywhere near my groups". With it off, the
+    # bridge drops group messages before they are ever forwarded, so nobody's
+    # group conversation reaches this process, let alone a model.
+    #
+    # It is not the setting that decides whether she speaks. That is each
+    # group's own row in group_modes, which defaults to "leave alone" — so
+    # turning this on reads every group and answers none of them until a group
+    # is chosen. It used to be the only group setting there was, which meant
+    # one flag away from replying to every message in every group.
     if contact_id.endswith("@g.us") and not ALLOW_GROUPS:
         return False
 
@@ -102,6 +115,21 @@ class IncomingMessage(BaseModel):
     # per-contact mode both key on contacts.json, not on this.
     push_name: str | None = Field(default=None, max_length=120)
 
+    # ---- groups ----
+    # Whether this arrived in a group, and whether anybody in it was talking
+    # to her. Both come from the bridge because both live on the WhatsApp
+    # message rather than in its text: an @mention is a list of ids, and a
+    # reply is a pointer to another message.
+    is_group: bool = False
+    addressed: bool = False
+    addressed_how: str = Field(default="", max_length=20)
+    sender_name: str | None = Field(default=None, max_length=120)
+    # The burst's messages before they were joined. A group has many speakers,
+    # so one joined body with one name attributes everyone's words to whoever
+    # spoke last; app.groups.compose_transcript turns this into text that says
+    # who said what. Bounded because it arrives from outside.
+    turns: list[dict] = Field(default_factory=list, max_length=20)
+
 
 def _require_bridge(token: str) -> None:
     """Only the local bridge may call these. Without the check, anyone who can
@@ -109,6 +137,38 @@ def _require_bridge(token: str) -> None:
     expected = os.getenv("BRIDGE_API_TOKEN", "")
     if not expected or not hmac.compare_digest(token.encode(), expected.encode()):
         raise HTTPException(401, "unauthorized")
+
+
+def _group_decision(msg: "IncomingMessage") -> groups.Decision:
+    """What this group's own rules say about one message.
+
+    The two settings are this group's; the ceilings are the same for every
+    group; the timestamps are what she has already said in HERE, which is the
+    only rate every member of the group can see.
+    """
+    mode, delivery = db.group_policy(msg.from_)
+    recent = [row["ts"] for row in db.outgoing_for_chat(msg.from_, time.time() - 3600)
+              if row.get("ts")]
+    policy = groups.from_env(mode, delivery, recent)
+    return groups.decide(groups.GroupMessage(
+        chat_id=msg.from_, is_group=True, body=msg.body,
+        addressed=msg.addressed, addressed_how=msg.addressed_how or "",
+        sender_name=msg.sender_name or "", at=time.time(),
+    ), policy)
+
+
+def _model_text(msg: "IncomingMessage") -> str:
+    """What the model is asked to answer.
+
+    A direct chat is one person, so the joined body is the whole truth. A group
+    is not: without a name against each run of messages the model reads a room
+    as one speaker and answers two people's separate questions in one reply.
+    """
+    if not msg.is_group:
+        return msg.body
+    turns = msg.turns or [{"sender_name": msg.sender_name or "", "body": msg.body,
+                           "number": msg.number, "sender_id": msg.from_}]
+    return groups.compose_transcript(turns)
 
 
 class ChatEvent(BaseModel):
@@ -151,7 +211,19 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         return {"action": "ignore"}
 
     name = name_for(msg.from_, msg.number)
-    mode = db.get_mode(name)
+
+    # A group and a direct chat are gated by different things, and the group
+    # path must not fall through to the per-contact one: name_for() on a group
+    # id finds nobody, so a group would take default_mode() and be judged by a
+    # setting that was never about it.
+    group = _group_decision(msg) if msg.is_group else None
+    if group is not None and group.action == "ignore":
+        # Nothing is stored and no model is called. A group left alone, or one
+        # where nobody was talking to her, costs this check and no more.
+        log_event("group_ignored", chat=anon(msg.from_), code=group.code)
+        return {"action": "ignore"}
+
+    mode = "auto" if group is not None else db.get_mode(name)
     if mode == "ignore":
         # Nothing is stored for an ignored message — that is the point of the
         # mode — but the drop itself is worth a line. It is otherwise the one
@@ -165,13 +237,17 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         run_agent,
         contact_id=msg.from_,
         message_type=msg.type,
-        raw_text=msg.body,
+        raw_text=_model_text(msg),
         media_base64=msg.media_base64,
     )
 
     add_user_message(msg.from_, result["resolved_text"])
 
     action, reason = result["action"], result.get("hold_reason", "")
+    # The group's own decision first: it is the only one of these gates that
+    # knows the reply is about to be public.
+    if group is not None and action == "send" and group.action == "hold":
+        action, reason = "hold", group.reason
     if action == "send" and not db.auto_reply_enabled():
         action, reason = "hold", "paused"          # global kill switch
     elif action == "send" and mode == "hold":
