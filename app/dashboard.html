@@ -23,6 +23,11 @@
     --e2:0 4px 12px rgba(16,24,32,.10);
     /* Motion. One curve. */
     --d-fast:120ms; --d-base:200ms; --d-slow:320ms; --ease:cubic-bezier(.2,0,.2,1);
+    /* The reply arrow, drawn rather than typed: a glyph like \u21a9 renders as an
+       emoji on some platforms, and an emoji standing in for an icon is the
+       thing this design does not do. Used as a mask, so only its shape
+       matters and it takes the colour of whatever it marks. */
+    --reply-mark:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14L4 9l5-5'/%3E%3Cpath d='M4 9h7a9 9 0 0 1 9 9v2'/%3E%3C/svg%3E");
     /* Colour roles, never raw colours. One accent; the rest is neutral.
        Contrast checked against WCAG AA: muted text 5.9:1, primary on white
        5.4:1, danger 6.5:1, warning 5.1:1. */
@@ -31,9 +36,17 @@
     --primary:#1a7a43; --primary-fg:#fff; --primary-weak:#e9f3ed;
     --success:#1a7a43; --warning:#9a6200; --danger:#b3261e; --info:#1f5f8a;
     --focus:#1a7a43;
+    /* The parts of a control the browser draws itself — a select's dropdown
+       and its option rows, scrollbars, the caret, autofill — come from the OS
+       palette, not from anything above. Without this the page painted dark
+       while the platform painted those light, or the other way round: dark
+       text on a dark popup. It has to be declared in every theme block,
+       because the theme can be chosen here while the OS says the opposite. */
+    color-scheme:light;
   }
   @media (prefers-color-scheme:dark){
     :root:not([data-theme="light"]){
+      color-scheme:dark;
       --bg:#0f1113; --surface:#17191c; --surface-raised:#1f2226;
       --border:#2a2d31; --text:#e8eaec; --text-muted:#9aa0a6;
       --primary:#3ba868; --primary-fg:#08120c; --primary-weak:#17281e;
@@ -42,8 +55,11 @@
       --e1:0 1px 2px rgba(0,0,0,.4); --e2:0 4px 12px rgba(0,0,0,.5);
     }
   }
-  /* Chosen outright, whatever the system says. */
+  /* Chosen outright, whatever the system says. This is the case that was
+     worst: a dark page with the platform still handing out a light palette
+     for every dropdown it draws. */
   :root[data-theme="dark"]{
+    color-scheme:dark;
     --bg:#0f1113; --surface:#17191c; --surface-raised:#1f2226;
     --border:#2a2d31; --text:#e8eaec; --text-muted:#9aa0a6;
     --primary:#3ba868; --primary-fg:#08120c; --primary-weak:#17281e;
@@ -209,8 +225,10 @@
     .tabs > button:active svg,.tabs > button:active .face{background:var(--surface-raised)}
     .tabs .badge{top:0;right:calc(50% - 26px)}
     /* Inside a conversation the bar goes away, as it does on the phone: the
-       back arrow is the way out, and the thread gets the height back. */
-    #shell:has(#view-whatsapp:not([hidden]) .wa-split[data-open="thread"]) .tabs{display:none}
+       back arrow is the way out, and the thread gets the height back. The
+       Held board's second screen is the same kind of place — one person, one
+       decision — so it keeps the height too. */
+    #shell:has(.view:not([hidden]) .split[data-open="detail"]) .tabs{display:none}
   }
 
   /* views */
@@ -234,8 +252,8 @@
   /* WhatsApp list */
   .wa-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--f-md);font-weight:600}
   .wa-head{display:flex;gap:var(--s2);align-items:center;min-height:40px}
-  #waWhoFace:empty{display:none}
-  #waWhoFace .avatar{width:32px;height:32px;font-size:var(--f-sm)}
+  #waWhoFace:empty,#heldWhoFace:empty{display:none}
+  #waWhoFace .avatar,#heldWhoFace .avatar{width:32px;height:32px;font-size:var(--f-sm)}
   .wa-row{display:flex;flex-direction:column;gap:var(--s1);width:100%;padding:var(--s2) var(--s3);
           border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);
           text-align:start;font:inherit;color:inherit;transition:background var(--d-fast) var(--ease)}
@@ -316,23 +334,41 @@
   .waauto.on{color:var(--primary)}
   /* On the list, a chat the assistant answers says so in a word, not a colour. */
   .wa-auto{font-size:var(--f-xs);font-weight:600;color:var(--primary);white-space:nowrap}
-  /* The conversation on the left, the list on the right, both always there.
-     The list used to be replaced by the thread, so every "back" was a round
-     trip to fetch chats that had never changed. */
+  /* Both panes are always there: the list used to be replaced by the thread,
+     so every "back" was a round trip to fetch chats that had never changed. */
   /* The whole view is a column: the two panes, then the reply bar sitting
      under the conversation only — it used to span the list as well, which is
      the one control on screen that belongs to exactly one pane. */
+  /* ---- the two-column frame, written once ----
+     Rows on the left, whatever you picked on the right. Every tab is built
+     this way: it is how WhatsApp Web works and how the owner already reads
+     this dashboard. On a phone the two are separate screens and `data-open`
+     says which one you are on, with the phone's own back gesture moving
+     between them. Four tabs hand-rolling this would drift within a week.
+     `min-width:0` on the columns is what keeps a long word inside one of
+     them; overflow-x:hidden elsewhere only hides the evidence. */
+  .split{flex:1;min-height:0;display:flex;gap:var(--s3)}
+  .col{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:var(--s2)}
+  .split-list{flex:0 0 var(--list-w,360px)}
+  @media (max-width:900px){
+    .split{display:block;position:relative;height:100%}
+    .split > .col{height:100%}
+    .split-list{flex:none}
+    .split[data-open="list"] .split-detail{display:none}
+    .split[data-open="detail"] .split-list{display:none}
+  }
+
   #view-whatsapp{display:flex;flex-direction:column;min-height:0}
-  .wa-split{flex:1;min-height:0;display:flex;gap:var(--s3)}
   #waReply,.quoting{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
   @media (max-width:900px){ #waReply,.quoting{margin-inline-start:0} }
-  .wa-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--s2)}
   /* The list leads, as it does in WhatsApp itself, and gets room for a real
      conversation name rather than three truncated words. */
   /* Width is a variable so the drag handle can move it and the reply bar can
      line up with the conversation without being told twice. */
   :root{--wa-list-w:400px}
-  .wa-list-col{flex:0 0 var(--wa-list-w)}
+  /* Only this tab's list can be dragged wider, so only this tab's list reads
+     its width from the dragged value. */
+  .wa-list-col{--list-w:var(--wa-list-w)}
   .wa-grip{flex:0 0 7px;cursor:col-resize;border-radius:var(--r-pill);
            background:transparent;transition:background var(--d-fast) var(--ease)}
   .wa-grip:hover,.wa-grip:focus-visible,.wa-grip.dragging{background:var(--primary)}
@@ -354,36 +390,41 @@
     .sheet{width:100%;max-width:100%;max-height:88dvh;margin:auto auto 0;
            border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0}
   }
-  /* The list is right there, so there is nothing to go back to. The button is
+  /* The list is right there, so there is nothing to go back to. These are
      only meaningful once the columns stack. */
-  @media (min-width:901px){ #waBack{display:none} }
+  @media (min-width:901px){ .pane-back{display:none} }
   .wa-split[data-open="list"] .wa-thread-col .panel{display:grid;place-items:center}
-  @media (max-width:900px){
-    /* One at a time on a narrow screen, with the back button to return. */
-    .wa-split{display:block;position:relative;height:100%}
-    .wa-col{height:100%}
-    .wa-split[data-open="list"] .wa-thread-col{display:none}
-    .wa-split[data-open="thread"] .wa-list-col{display:none}
-    .wa-list-col{flex:none}
-  }
+  /* ---- Held, in the same two columns as everything else ----
+     Who is waiting on the left. On the right, the order the decision is made
+     in: what they actually said, scrolling, and under it the reply about to
+     go out in your name — anchored where the phone app keeps its composer,
+     so the evidence moves and the decision does not. The folded rows this
+     replaces made every judgement a matter of opening and closing drawers to
+     find the one thing that decides it: the message. */
+  .held-people{--list-w:340px}
+  /* In a detail pane a control is read and pressed, not scanned in a list, so
+     it keeps its own width and a thumb-sized target instead of stretching
+     across the column. */
+  #personPanel .ai-pick,#personPanel .ghost{align-self:flex-start;min-height:44px}
+  #personPanel .ai-pick{padding:var(--s2) var(--s3);font-size:var(--f-sm)}
+  #heldDraft{flex:0 1 auto;max-height:50%;gap:var(--s3)}
+  #heldDraft textarea{flex:1;min-height:4em;margin-top:0}
+  #heldDraft .row{margin-top:0}
+  #heldDraft .row button{min-height:44px;flex:1 1 140px;max-width:240px}
+  /* How many are waiting from one person — rows, not cards, so a burst that
+     collapsed into one answer still says it is three messages behind. */
+  .held-n{flex:none;padding:0 var(--s2);line-height:20px;border-radius:var(--r-pill);
+          font-size:var(--f-xs);font-weight:700;color:var(--primary-fg);background:var(--primary)}
+  .held-say{font-size:var(--f-xs);color:var(--text-muted)}
+  .held-chip{flex:none;min-height:28px;padding:0 var(--s3);border-radius:var(--r-pill);
+             border:1px solid var(--border);background:var(--surface);color:var(--text-muted);
+             font-size:var(--f-xs);font-weight:600}
+  .held-chip:hover{background:var(--surface-raised);color:var(--text)}
+  /* The message the reply answers, marked the way a chosen row in a list is
+     marked, so "this is the one" looks the same wherever it is said. */
+  #heldTalk .msg[aria-current="true"]{border-color:var(--primary);background:var(--primary-weak)}
   /* A draft waiting on you is the one thing on this screen that needs doing,
      so it does not look like another message. */
-  /* One row per person, opened to show their drafts. Fifty cards in a single
-     column is a list nobody can work through; seven names with counts is. */
-  .heldgroup{border-bottom:1px solid var(--border)}
-  .heldgroup:last-child{border-bottom:0}
-  .heldgroup > summary{display:flex;gap:var(--s3);align-items:center;padding:var(--s2) var(--s3);
-                       cursor:pointer;list-style:none}
-  .heldgroup > summary::-webkit-details-marker{display:none}
-  .heldgroup > summary:hover{background:var(--surface-raised)}
-  .heldgroup[open] > summary{background:var(--surface-raised)}
-  .heldgroup .wa-main{flex:1;min-width:0}
-  .heldgroup .count{flex:none;font-size:var(--f-xs);font-weight:700;color:var(--primary-fg);
-                    background:var(--primary);border-radius:var(--r-pill);padding:0 var(--s2);
-                    line-height:20px}
-  .heldgroup .chev{flex:none;color:var(--text-muted);transition:transform var(--d-base) var(--ease)}
-  .heldgroup[open] .chev{transform:rotate(90deg)}
-  .heldbody{padding:var(--s2) var(--s3) var(--s3);display:flex;flex-direction:column;gap:var(--s3)}
   .wa-draft{margin-top:var(--s3);border:1px solid var(--warning);
             border-inline-start-width:4px;background:var(--surface-raised)}
   .wa-draft .wa-kind{color:var(--warning);text-transform:uppercase;letter-spacing:.06em}
@@ -392,7 +433,32 @@
   /* Tighter rows mean more of the conversation on screen, which is the whole
      point of the panel. Five more messages fit than before. */
   .msg{max-width:88%;padding:var(--s1) var(--s3);border:1px solid var(--border);
-       border-radius:var(--r-md);white-space:pre-wrap;line-height:1.4}
+       border-radius:var(--r-md);white-space:pre-wrap;line-height:1.4;
+       position:relative;
+       /* Drag a message to the right to reply to it, the way the phone app
+          does. pan-y leaves vertical scrolling to the browser and hands the
+          page the horizontal movement, so the gesture cannot fight the
+          thread it lives in. */
+       touch-action:pan-y}
+  /* The arrow that appears once the message has come far enough to mean it.
+     It sits in the gutter the message has just left, so it is inside the
+     pane rather than clipped against its edge. */
+  .msg::before{content:"";position:absolute;inset-inline-start:calc(-1 * var(--s6));
+       top:50%;width:20px;height:20px;margin-top:-10px;opacity:0;transform:scale(.6);
+       background:var(--primary);pointer-events:none;
+       -webkit-mask:var(--reply-mark) center/contain no-repeat;
+               mask:var(--reply-mark) center/contain no-repeat;
+       transition:opacity var(--d-fast) var(--ease),transform var(--d-fast) var(--ease)}
+  .msg.armed::before{opacity:1;transform:scale(1)}
+  .msg.springing{transition:transform var(--d-base) var(--ease)}
+  /* While you are writing the reply, the message being answered stays marked
+     in the thread. "Which one am I answering?" is the question a thin bar
+     above the composer cannot answer on its own. */
+  .msg.answering{box-shadow:0 0 0 2px var(--primary)}
+  /* Jumped to from a quote. Twice, briefly, because a highlight that is
+     already there when you arrive is one you do not notice. */
+  @keyframes found{0%,100%{box-shadow:none}25%,75%{box-shadow:0 0 0 3px var(--focus)}}
+  .msg.found{animation:found 1.3s var(--ease)}
   .msg time{margin-top:0}
   .wa-row{padding-block:var(--s1)}
   .me{align-self:flex-end;background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
@@ -435,8 +501,6 @@
   .who{font-weight:600;color:var(--text)}
   textarea{width:100%;margin-top:var(--s2);background:var(--surface-raised);resize:vertical}
   .hhead{display:flex;gap:var(--s3);align-items:flex-start}
-  .person{display:flex;gap:var(--s2);align-items:center;justify-content:space-between}
-  .person .hhead{align-items:center}
   .avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;overflow:hidden;
           color:var(--text-muted);font-weight:600;font-size:var(--f-sm);
           background:var(--surface-raised);border:1px solid var(--border)}
@@ -464,8 +528,22 @@
          border-inline-start:3px solid var(--primary);border-radius:var(--r-sm);
          background:var(--surface-raised);font-size:var(--f-sm);line-height:1.35}
   .quote b{display:block;font-size:var(--f-xs);font-weight:700;color:var(--primary)}
-  .quote span{display:block;color:var(--text-muted);overflow:hidden;
-              text-overflow:ellipsis;white-space:nowrap}
+  /* A line or two of what was said, not one ellipsised line that could be
+     anybody's. This is the part the owner kept asking for: enough of the
+     quoted message to recognise it. */
+  .quote span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+              color:var(--text-muted);overflow:hidden;white-space:pre-wrap}
+  /* The quote is a button: the reason anybody reads one is to go and look at
+     what it quotes. */
+  button.quote{width:100%;border:0;border-inline-start:3px solid var(--primary);
+               font:inherit;color:inherit;text-align:start;cursor:pointer;
+               transition:background var(--d-fast) var(--ease)}
+  button.quote:hover,button.quote:focus-visible{background:var(--primary-weak)}
+  .me button.quote:hover,.me button.quote:focus-visible{background:rgba(255,255,255,.28)}
+  /* Older than the fifty messages loaded here: there is nowhere to jump to,
+     so it stops pretending to be a control. */
+  .quote[aria-disabled="true"]{cursor:default}
+  .quote[aria-disabled="true"]:hover{background:var(--surface-raised)}
   /* On the owner's own bubble the accent colour is the background, so the
      quote borrows the foreground instead of disappearing. */
   .me .quote{background:rgba(255,255,255,.18);border-inline-start-color:var(--primary-fg)}
@@ -477,9 +555,15 @@
              background:transparent;color:inherit;opacity:.55}
   .quote-btn:hover,.quote-btn:focus-visible{opacity:1;background:var(--surface-raised)}
   .me .quote-btn:hover,.me .quote-btn:focus-visible{background:rgba(255,255,255,.2)}
+  /* Attached to the box you are about to type in, the way the phone app
+     attaches it: one shape, so there is no doubt the quote belongs to the
+     message being written. */
   .quoting{display:flex;gap:var(--s2);align-items:center;margin-top:var(--s2);
-           padding:var(--s2);border:1px solid var(--border);border-radius:var(--r-md);
-           background:var(--surface)}
+           margin-bottom:calc(-1 * var(--s3));
+           padding:var(--s2);border:1px solid var(--border);border-bottom:0;
+           border-radius:var(--r-lg) var(--r-lg) 0 0;background:var(--surface)}
+  #view-whatsapp:has(#quoting:not([hidden])) #waReply{border-start-start-radius:0;
+           border-start-end-radius:0}
   .quoting .quote{flex:1;min-width:0;margin:0;background:transparent}
 
   /* The long-press menu. Fixed rather than absolute, because it is placed
@@ -516,6 +600,30 @@
   .addrow input{width:100%}
   .hint{font-size:var(--f-xs);color:var(--text-muted)}
 
+  /* ---- choosing for several people at once ----
+     Setting twenty people meant twenty separate changes, each one a round trip
+     and none of them reviewable before it happened. */
+  #pickMode{min-height:44px;flex:none;white-space:nowrap}
+  #pickMode[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);
+                                 background:var(--primary-weak)}
+  /* The box is a target in its own right, and so is the rest of the row:
+     reaching for a 22px square is not what a thumb does. */
+  .pickbox{flex:none;width:22px;height:22px;padding:0;margin:0 var(--s1) 0 0;
+           accent-color:var(--primary)}
+  .panel.flat .wa-row:has(.pickbox){padding-inline-start:var(--s3)}
+  /* Under the list, so on a phone it lands where the thumb already is instead
+     of at the top of a list you have scrolled away from. */
+  .pickbar{flex:none;display:flex;flex-direction:column;gap:var(--s2);padding:var(--s3);
+           background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
+  .pickbar-row{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
+  .pickbar-row strong{flex:1 1 72px;min-width:72px}
+  .pickbar-row button{min-height:44px}
+  /* Each button says what it will do and to how many, so there is nothing to
+     work out from a count somewhere else on the bar. */
+  .pickbar-row.acts{border-top:1px solid var(--border);padding-top:var(--s2)}
+  .pickbar-row.acts button{flex:1;min-width:140px}
+  .pickbar p{margin:0}
+
   /* composer */
   #composer,#waReply{display:flex;gap:var(--s2);align-items:center;padding:var(--s2);background:var(--surface);
             border:1px solid var(--border);border-radius:var(--r-lg);transition:border-color var(--d-fast) var(--ease)}
@@ -533,6 +641,9 @@
   /* linking WhatsApp */
   .link-panel{margin:auto;text-align:center;max-width:360px;display:flex;flex-direction:column;
               gap:var(--s3);align-items:center}
+  /* The one hardcoded colour in this file that is not a foreground on
+     --danger, and it is deliberate: a QR code has to be dark-on-light to be
+     readable by a camera at all, so this stays white in both themes. */
   .link-panel img{width:260px;height:260px;max-width:100%;border-radius:var(--r-sm);
                   border:1px solid var(--border);background:#fff}
   .link-panel h2{margin:0;font-size:var(--f-lg)}
@@ -651,8 +762,8 @@
 
   <div id="pair" class="pair">
   <section id="view-whatsapp" class="view" hidden>
-    <div class="wa-split" data-open="list">
-      <div class="wa-col wa-list-col">
+    <div id="waSplit" class="split wa-split" data-open="list">
+      <div class="col split-list wa-list-col">
         <div class="wa-find">
           <input id="waSearch" class="wa-search" type="search" autocomplete="off"
                  placeholder="Search conversations" aria-label="Search conversations">
@@ -668,9 +779,9 @@
       <div id="waGrip" class="wa-grip" role="separator" aria-orientation="vertical"
            tabindex="0" aria-label="Drag to resize the chat list"
            title="Drag to resize — double-click to reset"></div>
-      <div class="wa-col wa-thread-col">
+      <div class="col split-detail wa-thread-col">
         <div class="wa-head">
-          <button id="waBack" class="icon" type="button" hidden aria-label="Back to conversations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <button id="waBack" class="icon pane-back" type="button" hidden aria-label="Back to conversations"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
           <span id="waWhoFace"></span>
           <strong id="waWho" class="wa-who" dir="auto">Pick a conversation</strong>
           <span id="waAutoWrap" class="waauto" hidden></span>
@@ -726,29 +837,90 @@
   </section>
   </div>
 
+  <!-- Three columns: who is waiting, what they said, and the reply you are
+       about to send as yourself. On a phone the first is a screen and the other
+       two are the next one, the way a conversation is. -->
   <section id="view-held" class="view" hidden>
-    <div class="wa-find">
-      <input id="heldSearch" class="wa-search" type="search" autocomplete="off"
-             placeholder="Search who is waiting" aria-label="Search the people waiting on a reply">
+    <div id="heldBoard" class="split" data-open="list">
+      <div class="col split-list held-people">
+        <div class="wa-find">
+          <input id="heldSearch" class="wa-search" type="search" autocomplete="off"
+                 placeholder="Search who is waiting" aria-label="Search the people waiting on a reply">
+        </div>
+        <!-- Said out loud when a refresh cannot get through: an empty board
+             and a stale one look identical otherwise. -->
+        <p id="heldStale" class="note err" role="status" hidden></p>
+        <div id="heldList" class="panel flat" role="group"
+             aria-label="People waiting on a reply"></div>
+      </div>
+      <div class="col split-detail">
+          <div class="wa-head">
+            <button id="heldBack" class="icon pane-back" type="button" hidden aria-label="Back to the people waiting"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <span id="heldWhoFace"></span>
+            <strong id="heldWho" class="wa-who" dir="auto">Nobody picked yet</strong>
+            <span id="heldWhoN" class="held-n" hidden></span>
+            <button id="heldOpenWa" class="icon" type="button" hidden title="Open this conversation"
+                    aria-label="Open this conversation in WhatsApp"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg></button>
+          </div>
+          <!-- Replaced wholesale on every poll, so deliberately not a live
+               region: it would re-read the thread aloud every thirty seconds. -->
+          <div id="heldTalk" class="panel"></div>
+          <!-- Under the conversation, not beside it: the reply is the last
+               thing you do, and on a phone this is where your thumb is. -->
+          <div id="heldDraft" class="panel"></div>
+      </div>
     </div>
-    <div id="heldList" class="panel flat"></div>
   </section>
 
+  <!-- Who you have talked to on the left, what was said on the right. The
+       contact picker used to be a third select in a row of them, which said
+       nothing about who had actually written to you. -->
   <section id="view-messages" class="view" hidden>
-    <div class="filters">
-      <select id="fContact" aria-label="Contact"></select>
-      <select id="fRange" aria-label="Time range">
-        <option value="today">Today</option><option value="yesterday">Yesterday</option>
-        <option value="last_7_days">Last 7 days</option><option value="all">Everything stored</option>
-      </select>
-      <select id="fDir" aria-label="Direction">
-        <option value="both">Sent and received</option><option value="received">Received</option><option value="sent">Sent by me</option>
-      </select>
+    <div id="messagesSplit" class="split" data-open="list">
+      <div class="col split-list">
+        <div class="wa-find">
+          <input id="msgSearch" class="wa-search" type="search" autocomplete="off"
+                 placeholder="Search people" aria-label="Search the people you have messaged">
+        </div>
+        <div class="filters">
+          <select id="fRange" aria-label="Time range">
+            <option value="today">Today</option><option value="yesterday">Yesterday</option>
+            <option value="last_7_days">Last 7 days</option><option value="all">Everything stored</option>
+          </select>
+          <select id="fDir" aria-label="Direction">
+            <option value="both">Sent and received</option><option value="received">Received</option><option value="sent">Sent by me</option>
+          </select>
+        </div>
+        <div id="msgPeople" class="panel flat" role="group" aria-label="People"></div>
+      </div>
+      <div class="col split-detail">
+        <div class="wa-head">
+          <button id="msgBack" class="icon pane-back" type="button" hidden aria-label="Back to the people"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <span id="msgWhoFace"></span>
+          <strong id="msgWho" class="wa-who" dir="auto">Everyone</strong>
+          <span id="msgRange" class="wa-when"></span>
+        </div>
+        <div id="messagesList" class="panel"></div>
+      </div>
     </div>
-    <div id="messagesList" class="panel"></div>
   </section>
 
-  <section id="view-activity" class="view" hidden><div id="activityList" class="panel"></div></section>
+  <!-- The feed, with a way to ask it about one person. Fifty mixed entries
+       is a wall; "what has she done with Mum" is the question being asked. -->
+  <section id="view-activity" class="view" hidden>
+    <div id="activitySplit" class="split" data-open="list">
+      <div class="col split-list">
+        <div id="actWho" class="panel flat" role="group" aria-label="What to look at"></div>
+      </div>
+      <div class="col split-detail">
+        <div class="wa-head">
+          <button id="actBack" class="icon pane-back" type="button" hidden aria-label="Back to the list"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <strong id="actWhoName" class="wa-who" dir="auto">Everything</strong>
+        </div>
+        <div id="activityList" class="panel"></div>
+      </div>
+    </div>
+  </section>
   <section id="view-notes" class="view" hidden>
     <div id="notesPanel" class="panel">
       <h2 class="noteh">About you</h2>
@@ -769,32 +941,76 @@
     </div>
   </section>
 
+  <!-- Contacts on the left, one person on the right. Everything that is about
+       the whole address book rather than about one person — the default, the
+       sync, adding somebody — lives in the right-hand column when nobody is
+       picked, so the list is never pushed down the screen by a form. -->
   <section id="view-people" class="view" hidden>
-    <div class="filters">
-      <button id="syncContacts" class="ghost" type="button">Sync from WhatsApp</button>
-      <label class="defmode">Anyone not chosen:
-        <select id="defaultMode" aria-label="What anyone you have not chosen gets, saved or not">
-          <option value="ignore">Leave alone</option>
-          <option value="hold">Ask me first</option>
-          <option value="auto">Reply automatically</option>
-        </select>
-      </label>
-      <p id="syncNote" class="note" role="status" aria-live="polite" dir="auto"></p>
+    <div id="peopleSplit" class="split" data-open="list">
+      <div class="col split-list">
+        <div class="wa-find">
+          <input id="peopleSearch" class="wa-search" type="search" autocomplete="off"
+                 placeholder="Search your contacts" aria-label="Search your contacts">
+          <button id="pickMode" class="ghost" type="button" aria-pressed="false">Choose several</button>
+        </div>
+        <p id="syncNote" class="note" role="status" aria-live="polite" dir="auto"></p>
+        <div id="peopleList" class="panel flat" role="group" aria-label="Your contacts"></div>
+        <!-- Under the list on purpose: on a phone that is where the thumb is,
+             and it is the one place that cannot scroll away from you. -->
+        <div id="pickBar" class="pickbar" hidden>
+          <div class="pickbar-row">
+            <strong id="pickCount" role="status">Nobody chosen yet</strong>
+            <button id="pickAll" class="ghost" type="button" aria-label="Select everyone shown">All</button>
+            <button id="pickNone" class="ghost" type="button" aria-label="Select nobody">None</button>
+            <button id="pickDone" class="ghost" type="button" aria-label="Finish choosing">Done</button>
+          </div>
+          <div id="pickActs" class="pickbar-row acts" role="group"
+               aria-label="What the people you chose get" hidden></div>
+          <p id="pickNote" class="note" role="status" aria-live="polite" dir="auto"></p>
+        </div>
+      </div>
+      <div class="col split-detail">
+        <div class="wa-head">
+          <button id="peopleBack" class="icon pane-back" type="button" hidden aria-label="Back to your contacts"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+          <span id="personFace"></span>
+          <strong id="personWho" class="wa-who" dir="auto">Your address book</strong>
+        </div>
+        <div id="personPanel" class="panel">
+          <!-- Everything that is about the whole address book rather than one
+               person. Held on to rather than rebuilt when somebody is picked,
+               so a half-typed name survives. -->
+          <div id="peopleSetup">
+            <p class="note">Pick somebody on the left to change what the assistant does with
+              them, or set what everyone else gets here.</p>
+            <div class="filters">
+              <button id="syncContacts" class="ghost" type="button">Sync from WhatsApp</button>
+              <label class="defmode">Anyone not chosen:
+                <select id="defaultMode" aria-label="What anyone you have not chosen gets, saved or not">
+                  <option value="ignore">Leave alone</option>
+                  <option value="hold">Ask me first</option>
+                  <option value="auto">Reply automatically</option>
+                </select>
+              </label>
+            </div>
+            <form id="addPerson" class="addrow">
+              <label for="addName">Name
+                <input id="addName" name="name" maxlength="60" autocomplete="off" required dir="auto">
+              </label>
+              <label for="addNumber">Phone number
+                <input id="addNumber" name="number" type="tel" maxlength="40" autocomplete="off" required
+                       placeholder="254712345678" inputmode="tel" aria-describedby="addNumberHint">
+                <span id="addNumberHint" class="hint">With the country code, no “+”.</span>
+              </label>
+              <button class="go" type="submit">Add</button>
+            </form>
+            <p id="addNote" class="note" role="status" aria-live="polite" dir="auto"></p>
+          </div>
+        </div>
+      </div>
     </div>
-    <form id="addPerson" class="addrow">
-      <label for="addName">Name
-        <input id="addName" name="name" maxlength="60" autocomplete="off" required dir="auto">
-      </label>
-      <label for="addNumber">Phone number
-        <input id="addNumber" name="number" type="tel" maxlength="40" autocomplete="off" required
-               placeholder="254712345678" inputmode="tel" aria-describedby="addNumberHint">
-        <span id="addNumberHint" class="hint">With the country code, no “+”.</span>
-      </label>
-      <button class="go" type="submit">Add</button>
-    </form>
-    <p id="addNote" class="note" role="status" aria-live="polite" dir="auto"></p>
-    <div id="peopleList" class="panel"></div>
   </section>
+
+
   </div>
   <audio id="voice" hidden></audio>
 </main>
@@ -879,6 +1095,27 @@
     <input id="forwardFind" class="wa-search" type="search" autocomplete="off"
            placeholder="Search conversations" aria-label="Search conversations to forward to">
     <div id="forwardList" class="panel flat"></div>
+  </div>
+</dialog>
+
+<!-- Direct is the one choice here that cannot be taken back: she answers those
+     people herself, as you, with nothing waiting for approval. Doing it to
+     twenty at once deserves one sentence and a second press. "Ask me" and
+     "Off" apply straight away — neither of them can say anything in public. -->
+<dialog id="confirmDirect" class="sheet" aria-labelledby="confirmDirectTitle">
+  <div class="sheet-head">
+    <div class="sheet-id">
+      <h2 id="confirmDirectTitle">Let her answer them with no approval?</h2>
+      <p class="note">Direct means her reply goes out as you, and you see it afterwards.</p>
+    </div>
+    <button id="confirmDirectX" class="icon" type="button" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <p id="confirmDirectWho" class="note" dir="auto"></p>
+    <div class="row">
+      <button id="confirmDirectGo" class="go" type="button">Yes, set them to Direct</button>
+      <button id="confirmDirectNo" class="ghost" type="button">Cancel</button>
+    </div>
   </div>
 </dialog>
 
@@ -1047,6 +1284,49 @@
     if (!$("view-whatsapp").hidden) loadWa(true);
   }
   document.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => show(b.dataset.tab)));
+
+  // ---- the two-column frame, in script ----
+  // Every tab is a list and a detail pane. On a phone they are two screens, so
+  // opening one is a navigation: it pushes a history entry, and the phone's
+  // own back gesture returns to the list instead of leaving the dashboard.
+  // Written once for all of them — four tabs each with their own version of
+  // this is four places for the back gesture to be subtly wrong.
+  //
+  // `window.history` is spelled out at every call site below: `history` is
+  // taken in this scope by the assistant's own transcript.
+  const onePane = () => window.matchMedia("(max-width: 900px)").matches;
+  const inPane = () => Boolean((window.history.state || {}).pane);
+  const PANES = [];
+
+  /** Wire one split: the element, and what else closing its detail pane does. */
+  function makePane(id, onClose) {
+    const node = $(id);
+    const pane = {
+      isOpen: () => node.dataset.open === "detail",
+      open() {
+        node.dataset.open = "detail";
+        // One entry for "a detail pane is open", whoever opened it, so two
+        // panes left open in two tabs cannot cost two presses of back.
+        if (onePane() && !inPane()) window.history.pushState({ pane: true }, "");
+      },
+      close() { node.dataset.open = "list"; if (onClose) onClose(); },
+      back() { if (inPane()) window.history.back(); else pane.close(); },
+    };
+    PANES.push(pane);
+    return pane;
+  }
+  window.addEventListener("popstate", () => {
+    for (const pane of PANES) if (pane.isOpen()) pane.close();
+  });
+
+  // Closing a detail pane hides its back button: down here the button is the
+  // way out of a screen you are no longer on.
+  const hideBack = (id) => () => { $(id).hidden = true; };
+  const waPane = makePane("waSplit", backToList);
+  const heldPane = makePane("heldBoard", paintHeldHead);
+  const messagesPane = makePane("messagesSplit", hideBack("msgBack"));
+  const activityPane = makePane("activitySplit", hideBack("actBack"));
+  const peoplePane = makePane("peopleSplit", hideBack("peopleBack"));
 
   // ---- the switches, which live in the sheet now ----
   const autoBtn = $("autoBtn"), directBtn = $("directBtn"), copyBtn = $("copyBtn");
@@ -1400,9 +1680,7 @@
     try {
       contactNames = (await api("/api/contacts")).contacts;
       renderSuggestions();
-      const keep = $("fContact").value;
-      $("fContact").replaceChildren(new Option("Everyone", ""), ...contactNames.map((n) => new Option(n, n)));
-      $("fContact").value = keep;
+      paintMsgPeople();
     } catch { /* ignore */ }
   }
 
@@ -1493,15 +1771,103 @@
     }
     return wrap;
   }
+  const MARKS = {
+    everyone: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
+    feed: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    settings: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  };
+  const markOf = (name) => {
+    const box = el("div", "avatar");
+    box.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MARKS[name]}</svg>`;
+    return box;
+  };
+
+  /** One row in a list that picks what the right-hand column shows. The same
+   *  row the conversations use, so a list of people looks like a list of
+   *  people wherever it appears. */
+  function pickRow(id, label, sub, { current, chatId, onPick, side, glyph }) {
+    const row = btn("", "wa-row");
+    row.dataset.pick = id;
+    row.setAttribute("aria-current", String(current));
+    const main = el("div", "wa-main");
+    const name = el("span", "wa-name", label);
+    name.dir = "auto";
+    main.append(name);
+    if (sub) {
+      const under = el("span", "wa-prev", sub);
+      under.dir = "auto";
+      main.append(under);
+    }
+    // A row that is not a person gets a drawn mark rather than the first
+    // letter of a word — "E" in a circle reads as somebody called E.
+    row.append(glyph ? markOf(glyph) : avatar(label, chatId), main);
+    if (side) row.append(side);
+    row.onclick = onPick;
+    return row;
+  }
+
+  // ---- messages: who on the left, what was said on the right ----
+  let msgPick = "";          // "" means everyone
+  const EVERYONE = "Everyone";
+
+  function paintMsgPeople() {
+    const term = $("msgSearch").value.trim().toLowerCase();
+    const shown = contactNames.filter((n) => !term || n.toLowerCase().includes(term));
+    const rows = [pickRow("", EVERYONE, "Every conversation stored here", {
+      current: msgPick === "", onPick: () => openMsgPerson(""), glyph: "everyone",
+    })];
+    for (const name of shown) {
+      rows.push(pickRow(name, name, "", {
+        current: msgPick === name, onPick: () => openMsgPerson(name),
+      }));
+    }
+    if (term && !shown.length) rows.push(note("Nobody matches that."));
+    if (!contactNames.length) rows.push(note("No contacts yet."));
+    $("msgPeople").replaceChildren(...rows);
+  }
+
+  function openMsgPerson(name) {
+    msgPick = name;
+    $("msgWho").textContent = name || EVERYONE;
+    $("msgWhoFace").replaceChildren(...(name ? [avatar(name)] : []));
+    messagesPane.open();
+    paintMsgPeople();
+    loadMessages();
+  }
+
+  const rangeWords = () => {
+    const sel = $("fRange");
+    return (sel.options[sel.selectedIndex] || {}).text.toLowerCase() || "this range";
+  };
+
   async function loadMessages() {
     const list = $("messagesList");
+    paintMsgPeople();
+    $("msgBack").hidden = !messagesPane.isOpen();
+    // What is being shown, said on this screen too: on a phone the range and
+    // direction are back on the list screen, so a short answer here would
+    // otherwise look like there is nothing at all.
+    $("msgRange").textContent = rangeWords();
+    list.replaceChildren(note("Reading…"));
     try {
-      const q = new URLSearchParams({ contact: $("fContact").value, range: $("fRange").value, direction: $("fDir").value });
+      const q = new URLSearchParams({ contact: msgPick, range: $("fRange").value, direction: $("fDir").value });
       const { items } = await api(`/api/messages?${q}`);
-      list.replaceChildren(renderMessages(items));
+      if (items.length) return list.replaceChildren(renderMessages(items));
+      // Not "No messages found." on its own: the reason is nearly always the
+      // range, and the way out of it is one press.
+      const wider = btn("Show everything stored", "go");
+      wider.onclick = () => { $("fRange").value = "all"; loadMessages(); };
+      const box = el("div", "empty");
+      const span = $("fRange").value === "all" ? "in anything stored here" : `from ${rangeWords()}`;
+      box.append(el("h2", "", "Nothing here"),
+                 el("p", "", `No messages ${msgPick ? `with ${msgPick} ` : ""}${span}.`));
+      if ($("fRange").value !== "all") box.append(wider);
+      list.replaceChildren(box);
     } catch (err) { list.replaceChildren(note(err.message)); }
   }
-  ["fContact", "fRange", "fDir"].forEach((id) => ($(id).onchange = loadMessages));
+  ["fRange", "fDir"].forEach((id) => ($(id).onchange = loadMessages));
+  $("msgSearch").oninput = paintMsgPeople;      // local: the names are already here
+  $("msgBack").onclick = () => messagesPane.back();
 
   // ---- held replies ----
   const REASONS = {
@@ -1512,11 +1878,42 @@
     contact_mode: "This contact is set to always ask you first",
     quiet_hours: "Quiet hours — written, but not sent at this time of night",
   };
-  const heldList = $("heldList");
+  const heldList = $("heldList"), heldBoard = $("heldBoard"), heldTalk = $("heldTalk");
 
+  // The server trims the message being answered to about 160 characters. The
+  // card shows that, and the rest is one press away: it is the context for a
+  // decision, not the thing being read. `incoming` alone is the fallback for
+  // a server that has not been updated yet.
+  const shortIncoming = (item) => item.incoming_short || item.incoming || "";
+  const heldWho = (g) => g.name || g.from || "Unknown";
+  // Rows waiting, not cards drawn: three repetitions collapsed into one answer
+  // are still three messages the owner is behind on.
+  const heldWaiting = (g) => (typeof g.count === "number" ? g.count : g.items.length);
+  const alsoCleared = (said, n) =>
+    n ? `${said} The ${n} repeat${n === 1 ? "" : "s"} of it went with it.` : said;
+
+  /** Send or dismiss one waiting draft. Shared by the board and by the card
+   *  that appears under a conversation in the WhatsApp tab, because it is one
+   *  decision with one set of ways to fail. */
+  async function heldDecide(path, body, buttons, done, say) {
+    const busy = (b) => buttons.forEach((x) => (x.disabled = b));
+    busy(true);
+    try { done((await api(path, body)) || {}); }
+    catch (err) {
+      busy(false);
+      // Said where the press happened as well as in the transcript: the
+      // bridge being down is the common failure here, and the owner is
+      // looking at this column, not at the assistant's conversation.
+      say(err.message);
+      bubble("bot", err.message, true);
+    }
+  }
+
+  /** One draft as a card. Used under a conversation in the WhatsApp tab; the
+   *  board below lays the same decision out across its third column. */
   function heldCard(item) {
     const card = el("div", "draft");
-    const incoming = el("div", "from", `${item.name || item.from}: ${item.incoming}`);
+    const incoming = el("div", "from", `${heldWho(item)}: ${shortIncoming(item)}`);
     incoming.dir = "auto";
     const edit = el("textarea");
     edit.value = item.reply; edit.dir = "auto"; edit.rows = 2;
@@ -1529,90 +1926,347 @@
     // The model's own account of its reasoning, which is often more use than
     // the category above — it says what specifically it was unsure of.
     if (item.why) {
-      const why = el("div", "from why", `“${item.why}”`);
+      const why = el("div", "from why", `“${item.why_short || item.why}”`);
       why.dir = "auto";
       info.append(why);
     }
     const top = el("div", "hhead");
-    top.append(avatar(item.name || item.from), info);
+    top.append(avatar(heldWho(item)), info);
     card.append(top, edit, row);
 
-    const act = (path, makeBody, doneText) => async () => {
-      const busy = (b) => row.querySelectorAll("button").forEach((x) => (x.disabled = b));
-      busy(true);
-      try {
-        await api(path, makeBody());
-        card.remove();
-        bubble("bot", doneText);
-        refreshHeld(true);
-      } catch (err) { busy(false); bubble("bot", err.message, true); }
-    };
-    send.onclick = act(`/api/held/${item.id}/send`, () => ({ text: edit.value }), "Reply sent.");
-    dismiss.onclick = act(`/api/held/${item.id}/dismiss`, () => ({}), "Dismissed.");
+    const buttons = [send, dismiss];
+    const failed = el("p", "note err", "");
+    failed.setAttribute("role", "status");
+    card.append(failed);
+    const settled = (said) => { card.remove(); bubble("bot", said); refreshHeld(true); };
+    const say = (why) => { failed.textContent = why; };
+    send.onclick = () => heldDecide(`/api/held/${item.id}/send`, { text: edit.value }, buttons,
+      (r) => settled(alsoCleared("Reply sent.", r.duplicates_dismissed)), say);
+    dismiss.onclick = () => heldDecide(`/api/held/${item.id}/dismiss`, {}, buttons,
+      (r) => settled(alsoCleared("Dismissed.", r.duplicates_dismissed)), say);
     return card;
   }
 
-  /** One person's waiting drafts, folded away until you ask for them. The
-   *  open ones are remembered across a refresh, because this list reloads
-   *  every thirty seconds and a group that closed under you mid-read would
-   *  be worse than no refresh at all. */
-  const heldOpen = new Set();
+  /** ---- the board ----
+   *  Everything it draws is held here, so a repaint costs no request and the
+   *  thirty-second refresh cannot take away the person being read or the words
+   *  being typed. Those were the two things the folded list guarded, and they
+   *  are the two things a selection has to guard too. */
+  let heldGroups = [];            // as the server last reported them, newest first
+  let heldPick = "";              // key of the person whose reply is on screen
+  let heldPickName = "";          // kept so a person just cleared can still be named
+  let heldDraftId = 0;            // which of their drafts the third column holds
+  let heldTalkFor = "";           // whose messages the second column is showing
+  let heldStaleAt = 0;            // when a refresh last failed; 0 while they succeed
+  const heldEdits = new Map();    // draft id -> words typed but not yet sent
+  const heldWhole = new Set();    // draft ids shown in full rather than trimmed
 
-  function heldGroup(g) {
-    const box = el("details", "heldgroup");
-    box.open = heldOpen.has(g.chat_id);
-    box.ontoggle = () => (box.open ? heldOpen.add(g.chat_id) : heldOpen.delete(g.chat_id));
-    const head = el("summary");
-    const main = el("div", "wa-main");
-    const who = el("span", "wa-name", g.name || g.from);
-    const newest = g.items[0];
-    const prev = el("span", "wa-prev", newest ? newest.incoming : "");
-    who.dir = prev.dir = "auto";
-    main.append(who, prev);
-    const chev = el("span", "chev");
-    chev.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
-    head.append(avatar(g.name || g.from, g.chat_id), main,
-                el("span", "count", String(g.count)));
-    // A draft is about a conversation, and reading the rest of it is usually
-    // the thing you need before deciding. This was two tabs and a search away.
-    if (g.chat_id) {
-      const open = btn("", "icon");
-      open.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.7 7L4 20l1.1-4.8A8 8 0 1 1 21 12z"/></svg>';
-      open.title = "Open this conversation";
-      open.setAttribute("aria-label", `Open the conversation with ${g.name || g.from}`);
-      // Inside a <summary>, a click is the fold's click too unless it is
-      // stopped — opening the chat would also open the drawer behind it.
-      open.onclick = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        show("whatsapp");
-        openWa(g.chat_id, g.name || g.from);
-      };
-      head.append(open);
-    }
-    head.append(chev);
-    const body = el("div", "heldbody");
-    body.append(...g.items.map(heldCard));
-    box.append(head, body);
+  // A draft with no conversation behind it stands alone under its own key —
+  // the same rule the server groups by, so the two agree about who is who.
+  const heldKey = (g) => g.chat_id || (g.items[0] ? `#${g.items[0].id}` : "");
+  const heldFind = (key) => heldGroups.find((g) => heldKey(g) === key) || null;
+
+  const HELD_HERO = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
+  /** The middle column when there is no reply to read in it. Every one of
+   *  these says what happened and what to do, because a blank two-thirds of a
+   *  board reads as a fault. */
+  function heldEmpty(title, line, action) {
+    const box = el("div", "empty");
+    const hero = el("div", "hero");
+    hero.setAttribute("aria-hidden", "true");
+    hero.innerHTML = HELD_HERO;
+    box.append(hero, el("h2", "", title), el("p", "", line));
+    if (action) box.append(action);
     return box;
   }
 
+  // ---- the list: who is waiting ----
+  function heldPersonRow(g) {
+    const key = heldKey(g), waiting = heldWaiting(g), newest = g.items[0];
+    const row = btn("", "wa-row");
+    row.dataset.person = key;
+    row.setAttribute("aria-current", String(key === heldPick));
+    row.setAttribute("aria-label",
+      `${heldWho(g)} — ${waiting} ${waiting === 1 ? "message" : "messages"} waiting`);
+    const main = el("div", "wa-main");
+    const who = el("span", "wa-name", heldWho(g));
+    const prev = el("span", "wa-prev", newest ? shortIncoming(newest) : "");
+    who.dir = prev.dir = "auto";
+    main.append(who, prev);
+    const side = el("div", "wa-side");
+    side.append(el("span", "wa-when", newest && newest.ts ? when(newest.ts) : ""));
+    row.append(avatar(heldWho(g), g.chat_id), main, side,
+               el("span", "held-n", String(waiting)));
+    row.onclick = () => openHeldPerson(key);
+    return row;
+  }
+
+  function paintHeldPeople() {
+    const term = $("heldSearch").value.trim().toLowerCase();
+    const shown = heldGroups.filter((g) =>
+      !term || heldWho(g).toLowerCase().includes(term));
+    if (shown.length) return heldList.replaceChildren(...shown.map(heldPersonRow));
+    heldList.replaceChildren(note(
+      heldGroups.length ? "Nobody matches that."
+        : heldStaleAt ? "Nothing to show — the last check didn’t get through."
+        : "Nothing waiting for approval."));
+  }
+
+  // ---- the detail pane, upper half: what they actually said ----
+  /** One incoming message, in the same bubble the conversations use. The one
+   *  the reply answers is marked; the others are a press away, so a person who
+   *  wrote three separate things is three decisions and not a pile. */
+  function heldTurnBubble(item, g) {
+    const chosen = item.id === heldDraftId;
+    const whole = heldWhole.has(item.id);
+    const short = shortIncoming(item), full = item.incoming || short;
+    const bubble = el("div", "msg bot");
+    bubble.setAttribute("aria-current", String(chosen));
+    const body = el("div", "", whole ? full : short);
+    body.dir = "auto";
+    bubble.append(body);
+
+    const foot = el("div", "msg-foot");
+    if (item.ts) {
+      const stamp = el("time", "", when(item.ts));
+      stamp.dateTime = new Date(item.ts * 1000).toISOString();
+      foot.append(stamp);
+    }
+    // In plain words rather than as a bare number: the server answers a burst
+    // of near-identical messages with one reply, and that is worth a sentence.
+    if (item.repeats > 1) {
+      foot.append(el("span", "held-say", `${item.repeats} messages, one answer`));
+    }
+    if (full.length > short.length) {
+      const more = btn(whole ? "Shorten" : "Show it all", "held-chip");
+      more.setAttribute("aria-label", whole
+        ? "Show only the first part of this message" : "Show this message in full");
+      more.onclick = () => {
+        if (whole) heldWhole.delete(item.id); else heldWhole.add(item.id);
+        paintHeldTalk();
+      };
+      foot.append(more);
+    }
+    if (g.items.length > 1) {
+      if (chosen) foot.append(el("span", "held-say", "her answer is showing"));
+      else {
+        const pick = btn("Read her answer", "held-chip");
+        pick.setAttribute("aria-label", "Read the reply she wrote to this message");
+        pick.onclick = () => { heldDraftId = item.id; paintHeldTalk(); paintHeldDraft(); };
+        foot.append(pick);
+      }
+    }
+    bubble.append(foot);
+    return bubble;
+  }
+
+  /** The person cleared while they were on screen — the last draft sent, or
+   *  dismissed. Saying so beats an empty column, and the next person waiting
+   *  is the thing to offer next. */
+  function heldClearedPane() {
+    const next = heldGroups[0];
+    const name = heldPickName || "them";
+    if (!next) {
+      return heldEmpty("All clear",
+        `Nothing is waiting from ${name}, or from anyone else.`);
+    }
+    const go = btn(`Next: ${heldWho(next)} (${heldWaiting(next)} waiting)`, "go");
+    go.onclick = () => openHeldPerson(heldKey(next));
+    return heldEmpty("Nothing else from them",
+      `${name} is done. ${heldGroups.length === 1 ? "One person is" : `${heldGroups.length} people are`} still waiting.`,
+      go);
+  }
+
+  function paintHeldHead() {
+    const g = heldFind(heldPick);
+    const name = g ? heldWho(g) : heldPickName;
+    $("heldWho").textContent = heldPick ? (name || "Nobody picked yet") : "Nobody picked yet";
+    $("heldWhoFace").replaceChildren(...(g ? [avatar(name, g.chat_id)] : []));
+    const count = $("heldWhoN");
+    count.hidden = !g;
+    if (g) count.textContent = `${heldWaiting(g)} waiting`;
+    $("heldBack").hidden = !heldPane.isOpen();
+    // The rest of the conversation is usually what decides a borderline reply.
+    const open = $("heldOpenWa");
+    open.hidden = !(g && g.chat_id);
+    if (!open.hidden) {
+      open.setAttribute("aria-label", `Open the conversation with ${name} in WhatsApp`);
+      open.onclick = () => { show("whatsapp"); openWa(g.chat_id, name); };
+    }
+  }
+
+  function paintHeldTalk() {
+    const panel = heldTalk, g = heldFind(heldPick);
+    const same = heldTalkFor === heldPick;
+    const keep = panel.scrollTop;
+    const atEnd = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
+    paintHeldHead();
+    if (!heldPick) {
+      panel.replaceChildren(heldGroups.length
+        ? heldEmpty("Pick someone waiting",
+            "Their messages show here, with the reply she wrote under them.")
+        : heldStaleAt
+          ? heldEmpty("Can’t reach the server",
+              "What you can see may be out of date. It keeps trying every half minute.")
+          : heldEmpty("Nothing waiting for you",
+              "Replies she holds back for your approval appear here."));
+    } else if (!g) {
+      panel.replaceChildren(heldClearedPane());
+    } else {
+      // Newest at the bottom, so it reads like a conversation rather than a feed.
+      panel.replaceChildren(...g.items.slice().reverse().map((it) => heldTurnBubble(it, g)));
+    }
+    heldTalkFor = heldPick;
+    // Reading older messages must survive a refresh; a new person, or a new
+    // message while you were at the bottom, goes to the bottom.
+    panel.scrollTop = same && !atEnd ? keep : panel.scrollHeight;
+  }
+
+  // ---- the detail pane, lower half: the reply, and the decision ----
+  function paintHeldDraft() {
+    const host = $("heldDraft"), g = heldFind(heldPick);
+    const label = (text) => el("strong", "wa-kind", text);
+    // With the queue empty there is no reply to show and nothing to offer
+    // about one: the pane goes rather than contradicting the column above it.
+    host.hidden = !heldGroups.length;
+    if (host.hidden) return;
+    if (!heldPick || !g) {
+      return host.replaceChildren(label("The reply"), note(
+        !heldPick ? "Pick someone to read the reply she wrote for them."
+          : "Nothing of theirs is waiting any more."));
+    }
+    const item = g.items.find((i) => i.id === heldDraftId) || g.items[0];
+    heldDraftId = item.id;
+    const who = heldWho(g);
+    const parts = [label(`Her reply to ${who}`)];
+    if (item.reason) {
+      parts.push(el("p", "note", `Why she held it: ${REASONS[item.reason] || item.reason}`));
+    }
+    // The model's own account of what it was unsure of, which is usually more
+    // use than the category above.
+    if (item.why_short || item.why) {
+      const why = el("p", "note why", `“${item.why_short || item.why}”`);
+      why.dir = "auto";
+      parts.push(why);
+    }
+    if (item.repeats > 1) {
+      parts.push(el("p", "note", `She wrote this ${item.repeats} times. Send it once and the repeats go with it.`));
+    }
+    const edit = el("textarea");
+    edit.rows = 5;
+    edit.dir = "auto";
+    // What was typed and not yet sent outlives a repaint: this column is
+    // redrawn whenever the queue moves, and a half-edited reply is work.
+    edit.value = heldEdits.has(item.id) ? heldEdits.get(item.id) : item.reply;
+    edit.setAttribute("aria-label", `The reply to ${who}. Edit it before sending.`);
+    edit.oninput = () => heldEdits.set(item.id, edit.value);
+    const row = el("div", "row");
+    const send = btn("Send", "go"), dismiss = btn("Dismiss", "ghost");
+    row.append(send, dismiss);
+    const buttons = [send, dismiss];
+    send.setAttribute("aria-label", `Send this reply to ${who}`);
+    dismiss.setAttribute("aria-label", `Dismiss the reply to ${who}`);
+    // A refused send says so here, under the button that was pressed. It used
+    // to be said only in the assistant's own conversation, which is a
+    // different tab — so from this column a dead bridge looked like nothing
+    // happening at all.
+    const failed = el("p", "note err", "");
+    failed.setAttribute("role", "status");
+    const say = (why) => { failed.textContent = why; };
+    send.onclick = () => heldDecide(`/api/held/${item.id}/send`, { text: edit.value }, buttons,
+      (r) => {
+        bubble("bot", alsoCleared(`Reply sent to ${who}.`, r.duplicates_dismissed));
+        heldSettled(item.id);
+      }, say);
+    dismiss.onclick = () => heldDecide(`/api/held/${item.id}/dismiss`, {}, buttons,
+      (r) => {
+        bubble("bot", alsoCleared(`Dismissed the reply to ${who}.`, r.duplicates_dismissed));
+        heldSettled(item.id);
+      }, say);
+    parts.push(edit, row, failed,
+               el("p", "note", `It goes to ${who} on WhatsApp, under your name.`));
+    host.replaceChildren(...parts);
+  }
+
+  function paintHeld() {
+    paintHeldPeople();
+    paintHeldTalk();
+    paintHeldDraft();
+  }
+
+  /** One draft handled. Dropped from what is on screen straight away rather
+   *  than waiting for the next request to say so, and the next draft from the
+   *  same person takes its place. */
+  function heldSettled(id) {
+    heldEdits.delete(id);
+    heldWhole.delete(id);
+    for (let i = 0; i < heldGroups.length; i++) {
+      const items = heldGroups[i].items, at = items.findIndex((x) => x.id === id);
+      if (at < 0) continue;
+      // The card may have stood for repetitions of itself, which the server
+      // clears with it; `count` is corrected by the refresh underway below.
+      items.splice(at, 1);
+      heldGroups[i].count = Math.max(items.length, heldWaiting(heldGroups[i]) - 1);
+      if (!items.length) heldGroups.splice(i, 1);
+      break;
+    }
+    const g = heldFind(heldPick);
+    heldDraftId = g && g.items[0] ? g.items[0].id : 0;
+    paintHeld();
+    refreshHeld(true);
+  }
+
+  function openHeldPerson(key) {
+    const g = heldFind(key);
+    heldPick = key;
+    if (g) {
+      heldPickName = heldWho(g);
+      heldDraftId = g.items[0] ? g.items[0].id : 0;
+    }
+    heldPane.open();              // on a phone this is a screen, so back returns
+    paintHeld();
+  }
+
+  $("heldBack").onclick = () => heldPane.back();
+
   async function refreshHeld(force) {
     if (app.hidden) return;
-    if (!force && heldList.contains(document.activeElement)) return;   // don't wipe a reply being edited
+    // Don't take away a reply being edited, or a search being typed.
+    if (!force && heldBoard.contains(document.activeElement)) return;
     try {
       const [data, status] = await Promise.all([api("/api/held/by-contact"), api("/api/status")]);
       applyStatus(status);
-      const term = $("heldSearch").value.trim().toLowerCase();
-      const groups = data.groups.filter((g) =>
-        !term || (g.name || g.from || "").toLowerCase().includes(term));
-      heldList.replaceChildren(...(groups.length
-        ? groups.map(heldGroup)
-        : [note(term ? "Nobody matches that."
-                     : "Nothing waiting for approval.")]));
-    } catch { /* session expired (lock screen showing) or backend offline */ }
+      heldStaleAt = 0;
+      heldGroups = data.groups || [];
+      // Forget what was typed into drafts that are no longer waiting, so
+      // neither map can grow for the life of the page.
+      const live = new Set();
+      for (const g of heldGroups) for (const item of g.items) live.add(item.id);
+      for (const id of [...heldEdits.keys()]) if (!live.has(id)) heldEdits.delete(id);
+      for (const id of [...heldWhole]) if (!live.has(id)) heldWhole.delete(id);
+      // Nothing picked yet: start on the newest, so a wide board is never
+      // two-thirds empty while there is work in it. A person picked and since
+      // cleared keeps their place — paintHeldTalk says so rather than
+      // silently moving the owner on to somebody else's reply.
+      if (!heldPick && heldGroups.length) {
+        heldPick = heldKey(heldGroups[0]);
+        heldPickName = heldWho(heldGroups[0]);
+        heldDraftId = heldGroups[0].items[0] ? heldGroups[0].items[0].id : 0;
+      }
+      $("heldStale").hidden = true;
+      paintHeld();
+    } catch {
+      // Session expired (the lock screen is showing) or the backend is down.
+      // Either way the board is now stale, and it must not look settled.
+      heldStaleAt = Date.now();
+      const line = $("heldStale");
+      line.hidden = false;
+      line.textContent = `Couldn’t reach the server at ${new Date(heldStaleAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. This may be out of date.`;
+      paintHeld();
+    }
   }
-  $("heldSearch").oninput = () => refreshHeld(true);
+  $("heldSearch").oninput = paintHeldPeople;      // local: no request, no round trip
   setInterval(refreshHeld, 30000);
 
   // ---- activity ----
@@ -1647,50 +2301,296 @@
     const words = String(kind || "").replace(/_/g, " ").trim();
     return words ? words[0].toUpperCase() + words.slice(1) : "Something happened";
   };
+  // The feed read whole is a wall of fifty mixed lines. What is actually
+  // being asked of it is "what has she done with Mum" or "what did I change",
+  // so the left column asks that and the right column answers it.
+  let actItems = [], actPick = "", actFailed = "";
+  const SETTINGS_PICK = "\u0000settings";       // not a name, so it cannot collide with one
+
+  const actOf = (a) => (ACTIVITY[a.kind] || (() => sentence(a.kind)))(a);
+  const actKeep = (a) => actPick === "" || (actPick === SETTINGS_PICK ? !a.name : a.name === actPick);
+
+  function paintActivity() {
+    const counts = new Map();
+    let settings = 0;
+    for (const a of actItems) {
+      if (a.name) counts.set(a.name, (counts.get(a.name) || 0) + 1);
+      else settings++;
+    }
+    const tally = (n) => el("span", "wa-when", String(n));
+    const rows = [pickRow("", "Everything", `${actItems.length} most recent`, {
+      current: actPick === "", onPick: () => openActivity(""),
+      side: tally(actItems.length), glyph: "feed",
+    })];
+    for (const [name, n] of counts) {
+      rows.push(pickRow(name, name, `${n} ${n === 1 ? "entry" : "entries"}`, {
+        current: actPick === name, onPick: () => openActivity(name), side: tally(n),
+      }));
+    }
+    if (settings) {
+      rows.push(pickRow(SETTINGS_PICK, "Settings and switches", "Changes you made yourself", {
+        current: actPick === SETTINGS_PICK, onPick: () => openActivity(SETTINGS_PICK),
+        side: tally(settings), glyph: "settings",
+      }));
+    }
+    if (actFailed) rows.push(note(actFailed));
+    else if (!actItems.length) rows.push(note("Nothing has happened yet."));
+    $("actWho").replaceChildren(...rows);
+
+    $("actWhoName").textContent = actPick === "" ? "Everything"
+      : actPick === SETTINGS_PICK ? "Settings and switches" : actPick;
+    $("actBack").hidden = !activityPane.isOpen();
+
+    const shown = actItems.filter(actKeep);
+    $("activityList").replaceChildren(...(shown.length ? shown.map((a) => {
+      const row = el("div", "draft");
+      row.dataset.kind = a.kind;
+      const what = el("div", "", actOf(a));
+      what.dir = "auto";
+      row.append(el("div", "from", new Date(a.ts * 1000).toLocaleString()), what);
+      return row;
+    }) : [note(actFailed || (actItems.length ? "Nothing here for them yet." : "No activity yet."))]));
+  }
+
+  function openActivity(pick) {
+    actPick = pick;
+    activityPane.open();
+    paintActivity();
+  }
+  $("actBack").onclick = () => activityPane.back();
+
   async function loadActivity() {
-    const list = $("activityList");
     try {
-      const { items } = await api("/api/audit?limit=50");
-      list.replaceChildren(...(items.length ? items.map((a) => {
-        const row = el("div", "draft");
-        row.dataset.kind = a.kind;
-        const what = el("div", "", (ACTIVITY[a.kind] || (() => sentence(a.kind)))(a));
-        what.dir = "auto";
-        row.append(el("div", "from", new Date(a.ts * 1000).toLocaleString()), what);
-        return row;
-      }) : [note("No activity yet.")]));
-    } catch (err) { list.replaceChildren(note(err.message)); }
+      actItems = (await api("/api/audit?limit=50")).items;
+      actFailed = "";
+    } catch (err) { actFailed = err.message; actItems = []; }
+    paintActivity();
   }
 
   // ---- per-contact modes ----
   const MODES = { auto: "Reply automatically", hold: "Always ask me first", ignore: "Ignore" };
+  // The same three choices as the conversations carry, in the same words, so
+  // "Direct" means one thing across the dashboard.
+  const MODE_SAYS = {
+    auto: "She answers them herself, as you, with nothing waiting for your approval.",
+    hold: "She writes the reply and it waits in Held until you send it.",
+    ignore: "She leaves them alone. Nothing is written and nothing is sent.",
+  };
+
+  let peopleAll = [];            // every contact and the mode it has now
+  let peopleShown = [];          // the names the list is showing, after the search
+  let peopleDefault = "hold";    // what anyone not chosen gets
+  let peoplePick = "";           // the one on the right
+  let peoplePicking = false;     // ticking several at once
+  const peoplePicked = new Set();
+  // Held on to rather than rebuilt, so a half-typed name survives a repaint.
+  const peopleSetup = $("peopleSetup");
+
   async function loadPeople() {
-    const list = $("peopleList");
     try {
       const { contacts, default: fallback, auto_count } = await api("/api/contact-modes");
+      peopleAll = contacts;
+      peopleDefault = fallback;
       $("defaultMode").value = fallback;
       $("syncNote").textContent = contacts.length
         ? `${auto_count} of ${contacts.length} set to reply automatically.`
         : "";
-      list.replaceChildren(...(contacts.length ? contacts.map((c) => {
-        const row = el("div", "draft person");
-        const label = el("span", "", c.name);
-        label.dir = "auto";
-        const select = el("select");
-        select.setAttribute("aria-label", `Mode for ${c.name}`);
-        for (const [value, text] of Object.entries(MODES)) select.add(new Option(text, value, false, value === c.mode));
-        select.onchange = async () => {
-          select.disabled = true;
-          try { await api("/api/contact-modes", { name: c.name, mode: select.value }); }
-          catch (err) { bubble("bot", err.message, true); loadPeople(); }
-          finally { select.disabled = false; }
-        };
-        const lead = el("div", "hhead");
-        lead.append(avatar(c.name), label);
-        row.append(lead, select);
-        return row;
-      }) : [note("No contacts yet. Sync from WhatsApp to bring in your address book.")]));
-    } catch (err) { list.replaceChildren(note(err.message)); }
+      // A name that has gone — renamed, or the book re-synced — cannot be set.
+      const live = new Set(contacts.map((c) => c.name));
+      for (const name of [...peoplePicked]) if (!live.has(name)) peoplePicked.delete(name);
+      paintPeople();
+    } catch (err) {
+      $("peopleList").replaceChildren(note(err.message));
+      $("personPanel").replaceChildren(note(err.message));
+    }
+  }
+
+  const personOf = (name) => peopleAll.find((c) => c.name === name) || null;
+
+  function peopleRow(c) {
+    const row = el("div", "wa-row");
+    row.dataset.pick = c.name;
+    row.setAttribute("aria-current", String(c.name === peoplePick && !peoplePicking));
+    if (peoplePicking) {
+      const tick = el("input");
+      tick.type = "checkbox";
+      tick.className = "pickbox";
+      tick.checked = peoplePicked.has(c.name);
+      tick.setAttribute("aria-label", `Choose ${c.name}`);
+      tick.onchange = () => togglePicked(c.name, tick.checked);
+      row.append(tick);
+    }
+    const open = btn("", "wa-openrow");
+    const main = el("div", "wa-main");
+    const name = el("span", "wa-name", c.name);
+    name.dir = "auto";
+    main.append(name);
+    // One word on the right rather than a second line under every name:
+    // twenty-five rows each saying "Reply automatically" is not information.
+    const short = (AI_CHOICES.find(([v]) => v === c.mode) || [, c.mode])[1];
+    open.append(avatar(c.name), main,
+                el("span", c.mode === "auto" ? "wa-auto" : "wa-when", short));
+    // While you are choosing several, the row is one more way to tick one:
+    // reaching for a 22px box is not what a thumb does.
+    open.onclick = peoplePicking
+      ? () => togglePicked(c.name, !peoplePicked.has(c.name))
+      : () => openPerson(c.name);
+    open.setAttribute("aria-label", peoplePicking
+      ? `Choose ${c.name}` : `${c.name} — ${(MODES[c.mode] || c.mode).toLowerCase()}`);
+    row.append(open);
+    return row;
+  }
+
+  function paintPeople() {
+    const term = $("peopleSearch").value.trim().toLowerCase();
+    const shown = peopleAll.filter((c) => !term || c.name.toLowerCase().includes(term));
+    peopleShown = shown.map((c) => c.name);
+    $("peopleList").replaceChildren(...(shown.length ? shown.map(peopleRow)
+      : [note(peopleAll.length ? "Nobody matches that."
+              : "No contacts yet. Sync from WhatsApp to bring in your address book.")]));
+    paintPickBar();
+    paintPerson();
+  }
+
+  /** The right-hand column: one person, or — when nobody is picked — the
+   *  things that are about the whole address book. */
+  function paintPerson() {
+    const panel = $("personPanel"), c = personOf(peoplePick);
+    $("peopleBack").hidden = !peoplePane.isOpen();
+    $("personWho").textContent = c ? c.name : "Your address book";
+    $("personFace").replaceChildren(...(c ? [avatar(c.name)] : []));
+    if (!c) {
+      // Not a hero with nothing behind it: the empty state is where adding
+      // somebody and setting the default actually belong.
+      panel.replaceChildren(peopleSetup);
+      return;
+    }
+    const parts = [el("strong", "wa-kind", "What the assistant does with them")];
+    const pick = aiPicker(c.mode, `What the assistant does with ${c.name}`, async (mode) => {
+      await api("/api/contact-modes", { name: c.name, mode });
+      c.mode = mode;
+      said.textContent = MODE_SAYS[mode];
+      paintPeople();
+    });
+    const said = el("p", "note", MODE_SAYS[c.mode] || "");
+    parts.push(pick, said);
+    if (c.mode === peopleDefault) {
+      parts.push(el("p", "note", `This is also what anyone you have not chosen gets.`));
+    }
+    // The conversation itself, when the chat list has one under this name.
+    const chat = waChats.find((x) => !x.is_group && x.name === c.name);
+    if (chat) {
+      const go = btn("Open their conversation", "ghost");
+      go.onclick = () => { show("whatsapp"); openWa(chat.id, chat.name); };
+      parts.push(el("p", "note", chat.preview ? `Last message: ${chat.preview}` : ""), go);
+    } else {
+      parts.push(el("p", "note",
+        "No conversation of theirs has been read into this dashboard yet, so there is nothing to open."));
+    }
+    panel.replaceChildren(...parts);
+  }
+
+  function openPerson(name) {
+    peoplePick = name;
+    peoplePane.open();
+    paintPeople();
+  }
+  $("peopleBack").onclick = () => peoplePane.back();
+  $("peopleSearch").oninput = paintPeople;     // local: the names are already here
+
+  // ---- one choice, many people ----
+  // Twenty people meant twenty separate changes, each one its own request and
+  // none of them reviewable before it happened.
+  function togglePicked(name, on) {
+    if (on) peoplePicked.add(name); else peoplePicked.delete(name);
+    paintPeople();
+  }
+
+  function paintPickBar() {
+    const bar = $("pickBar"), n = peoplePicked.size;
+    bar.hidden = !peoplePicking;
+    $("pickMode").setAttribute("aria-pressed", String(peoplePicking));
+    if (!peoplePicking) return;
+    $("pickCount").textContent = n
+      ? `${n} chosen` : "Nobody chosen yet";
+    $("pickAll").textContent = `All ${peopleShown.length}`;
+    $("pickAll").setAttribute("aria-label",
+      `Select all ${peopleShown.length} people shown`);
+    const acts = $("pickActs");
+    acts.hidden = !n;
+    if (!n) return void acts.replaceChildren();
+    // Each button says what it will do and to how many. "Apply" with the
+    // count somewhere else on the bar is a sentence the owner has to assemble.
+    acts.replaceChildren(...AI_CHOICES.map(([mode, short]) => {
+      const b = btn(`Set ${n} to ${short}`, mode === "hold" ? "go" : "ghost");
+      b.setAttribute("aria-label",
+        `Set ${n} ${n === 1 ? "person" : "people"} to ${(MODES[mode] || mode).toLowerCase()}`);
+      b.onclick = () => applyPicked(mode);
+      return b;
+    }));
+  }
+
+  $("pickMode").onclick = () => {
+    peoplePicking = !peoplePicking;
+    if (!peoplePicking) peoplePicked.clear();
+    $("pickNote").textContent = "";
+    paintPeople();
+  };
+  $("pickAll").onclick = () => { for (const n of peopleShown) peoplePicked.add(n); paintPeople(); };
+  $("pickNone").onclick = () => { peoplePicked.clear(); paintPeople(); };
+  $("pickDone").onclick = () => {
+    peoplePicking = false;
+    peoplePicked.clear();
+    $("pickNote").textContent = "";
+    paintPeople();
+  };
+
+  /** Direct is the one choice here that can go wrong in public — she answers
+   *  those people herself, as you — so it is the one that asks first. */
+  function confirmDirect(names) {
+    const dialog = $("confirmDirect"), n = names.length;
+    $("confirmDirectGo").textContent = `Yes, set ${n} to Direct`;
+    $("confirmDirectWho").textContent =
+      `${n} ${n === 1 ? "person" : "people"}: ${names.slice(0, 8).join(", ")}`
+      + (n > 8 ? `, and ${n - 8} more.` : ".");
+    dialog.showModal();
+    $("confirmDirectGo").focus();
+    return new Promise((resolve) => {
+      const done = (yes) => { if (dialog.open) dialog.close(); resolve(yes); };
+      $("confirmDirectGo").onclick = () => done(true);
+      $("confirmDirectNo").onclick = () => done(false);
+      $("confirmDirectX").onclick = () => done(false);
+      dialog.onclick = (e) => { if (e.target === dialog) done(false); };
+      dialog.oncancel = () => done(false);          // Escape
+    });
+  }
+
+  async function applyPicked(mode) {
+    const names = [...peoplePicked];
+    if (!names.length) return;
+    if (mode === "auto" && !(await confirmDirect(names))) return;
+    const buttons = [...$("pickActs").querySelectorAll("button")];
+    buttons.forEach((b) => (b.disabled = true));
+    $("pickNote").textContent = "Saving…";
+    try {
+      const r = await api("/api/contacts/modes", { names, mode });
+      const changed = typeof r.changed === "number" ? r.changed : names.length;
+      const unknown = r.unknown || [];
+      let said = `${changed} ${changed === 1 ? "person" : "people"} set to ${(MODES[r.mode || mode] || mode).toLowerCase()}.`;
+      // Said plainly rather than reported as a clean success: a name that
+      // matched nobody was not set, and nobody reads twenty confirmations.
+      if (unknown.length) {
+        said += ` ${unknown.length === 1 ? "This name matched nobody" : "These names matched nobody"}: ${unknown.slice(0, 6).join(", ")}${unknown.length > 6 ? ", …" : ""}.`;
+      }
+      $("pickNote").textContent = said;
+      bubble("bot", said);
+      peoplePicked.clear();
+      await loadPeople();
+    } catch (err) {
+      $("pickNote").textContent = err.message;
+      bubble("bot", err.message, true);
+      buttons.forEach((b) => (b.disabled = false));
+    }
   }
 
   // Everyone you have not chosen gets this — including people who are not in
@@ -1941,13 +2841,62 @@
 
   function quoteBlock(m) {
     const q = m.quoted;
-    const box = el("div", "quote");
+    const box = btn("", "quote");
+    // Two names for the same message: the serialized id, when the quote
+    // carries one, and WhatsApp's own id, which is the tail of a serialized
+    // one. Either may be the name this thread knows it by.
+    box.dataset.qid = q.id || "";
+    box.dataset.qstanza = q.stanza_id || "";
     const who = el("b", "", quotedWho(q, $("waWho").textContent));
     const what = el("span", "", q.kind && q.preview ? `${q.kind} · ${q.preview}`
                                 : q.kind || q.preview || "Message");
     what.dir = "auto";
     box.append(who, what);
+    box.setAttribute("aria-label",
+      `Answering ${who.textContent}: ${what.textContent}. Go to that message.`);
+    box.onclick = (event) => {
+      event.stopPropagation();          // not a click on the message behind it
+      showQuoted(box.dataset.qid, box.dataset.qstanza);
+    };
     return box;
+  }
+
+  /** The message in this thread that a quote points at, or null. */
+  function findQuoted(id, stanza) {
+    const panel = $("waPanel");
+    if (id) {
+      const byId = panel.querySelector(`[data-msg="${CSS.escape(id)}"]`);
+      if (byId) return byId;
+    }
+    if (!stanza) return null;
+    for (const node of panel.querySelectorAll("[data-msg]")) {
+      if (node.dataset.msg.split("_")[2] === stanza) return node;
+    }
+    return null;
+  }
+
+  /** Go to the message a quote quotes, and say which one it was. */
+  function showQuoted(id, stanza) {
+    const target = findQuoted(id, stanza);
+    if (!target) return false;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.remove("found");
+    void target.offsetWidth;            // restart it if the same one is asked for twice
+    target.classList.add("found");
+    setTimeout(() => target.classList.remove("found"), 1400);
+    return true;
+  }
+
+  /** A quote whose original is older than the fifty messages loaded here
+   *  cannot go anywhere, so it stops offering to. Run once the thread is in
+   *  the DOM: half of it does not exist while the bubbles are being built. */
+  function markQuoteTargets() {
+    for (const box of $("waPanel").querySelectorAll("button.quote")) {
+      if (findQuoted(box.dataset.qid, box.dataset.qstanza)) continue;
+      box.setAttribute("aria-disabled", "true");
+      box.onclick = null;
+      box.title = "The message this answers is older than what is loaded here.";
+    }
   }
 
   // Which message the next reply will quote, if any.
@@ -1958,12 +2907,26 @@
     $("quotingWho").textContent = m.from_me ? "You" : ($("waWho").textContent || "Them");
     $("quotingWhat").textContent = m.body || m.kind || "Message";
     $("quoting").hidden = false;
+    markAnswering();
     $("waText").focus();
   }
 
   function stopQuoting() {
     quoting = null;
     $("quoting").hidden = true;
+    markAnswering();
+  }
+
+  /** The message being answered, marked in the thread itself. Re-applied
+   *  after every repaint, because the thread is rebuilt on every poll and
+   *  the mark would otherwise last until the next one. */
+  function markAnswering() {
+    for (const node of $("waPanel").querySelectorAll(".msg.answering")) {
+      node.classList.remove("answering");
+    }
+    if (!quoting) return;
+    const node = $("waPanel").querySelector(`[data-msg="${CSS.escape(quoting.id)}"]`);
+    if (node) node.classList.add("answering");
   }
   $("quotingX").onclick = () => { stopQuoting(); $("waText").focus(); };
 
@@ -2142,8 +3105,84 @@
   $("forwardX").onclick = () => forwardDialog.close();
   forwardDialog.onclick = (e) => { if (e.target === forwardDialog) forwardDialog.close(); };
 
+  // How far a message has to come before the gesture means it, and how far
+  // it will go at all. Measured against the phone app: far enough to be
+  // deliberate, short enough not to feel like dragging a window.
+  const SWIPE_ARM = 52, SWIPE_MAX = 80;
+
+  /** Drag a message to the right to reply to it — the phone app's own
+   *  gesture. Pointer Events, so one implementation covers a finger, a pen
+   *  and a mouse.
+   *
+   *  The direction is decided from the first few pixels and then left alone:
+   *  a drag that starts vertical is the thread being scrolled and is handed
+   *  straight back to the browser. Without that, every scroll through a
+   *  conversation would drag whichever message the thumb landed on. */
+  function armSwipeReply(bubble, m) {
+    let active = 0, startX = 0, startY = 0, axis = "", pulled = false;
+    const settle = () => {
+      bubble.classList.remove("armed");
+      bubble.classList.add("springing");
+      bubble.style.transform = "";
+      setTimeout(() => bubble.classList.remove("springing"), 240);
+    };
+    bubble.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;  // right-click is the menu
+      active = event.pointerId;
+      startX = event.clientX; startY = event.clientY;
+      axis = ""; pulled = false;
+    });
+    bubble.addEventListener("pointermove", (event) => {
+      if (event.pointerId !== active) return;
+      const dx = event.clientX - startX, dy = event.clientY - startY;
+      if (!axis) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;     // too small to mean anything yet
+        axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? "x" : "y";
+        if (axis !== "x") { active = 0; return; }             // a scroll: leave it alone
+        // The finger will leave the bubble long before the gesture ends.
+        try { bubble.setPointerCapture(active); } catch { /* already gone */ }
+      }
+      const pull = Math.max(0, Math.min(dx, SWIPE_MAX));
+      pulled = pulled || pull > 2;
+      bubble.style.transform = `translateX(${pull}px)`;
+      bubble.classList.toggle("armed", pull >= SWIPE_ARM);
+    });
+    const release = (event) => {
+      if (event.pointerId !== active) return;
+      active = 0;
+      const armed = bubble.classList.contains("armed");
+      settle();
+      if (armed) startQuoting(m);
+    };
+    bubble.addEventListener("pointerup", release);
+    bubble.addEventListener("pointercancel", release);
+    // The end of a drag is still a click as far as the browser is concerned,
+    // and it would land on whatever is under the finger — usually the menu
+    // button at the end of the row.
+    bubble.addEventListener("click", (event) => {
+      if (!pulled) return;
+      pulled = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+  }
+
   function waBubble(m, chatId) {
     const bubble = el("div", `msg ${m.from_me ? "me" : "bot"}`);
+    // Named, so a quote elsewhere in the thread can find it and the mark on
+    // the message being answered can be put back after a repaint.
+    bubble.dataset.msg = m.id;
+    // A mouse has the menu and a finger has the gesture; a keyboard had
+    // neither until this. R is what the phone app's own shortcut is.
+    bubble.tabIndex = 0;
+    bubble.setAttribute("aria-keyshortcuts", "R");
+    bubble.addEventListener("keydown", (event) => {
+      if (event.key !== "r" && event.key !== "R") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      startQuoting(m);
+    });
+    armSwipeReply(bubble, m);
     // The quote comes first, as it does in WhatsApp: it is the context for
     // everything under it.
     if (m.quoted) bubble.append(quoteBlock(m));
@@ -2349,9 +3388,8 @@
     $("waReply").hidden = true;
     $("waPanel").hidden = true;
     $("assistantPane").hidden = false;
-    waSplit().dataset.open = "thread";
     $("waBack").hidden = false;
-    pushThread();
+    waPane.open();
     markOpenRow(ASSISTANT);
     $("text").focus();
   }
@@ -2498,6 +3536,10 @@
       $("waReply").hidden = chat.is_group;
       if (chat.is_group) panel.append(note("Replying to groups from here is switched off."));
       panel.scrollTop = toBottom || wasAtBottom ? panel.scrollHeight : keep;
+      // Both of these need the thread to exist first: one looks for the
+      // message each quote points at, the other for the one being answered.
+      markQuoteTargets();
+      markAnswering();
       showDraftFor(waChat, false);
     } catch (err) { panel.replaceChildren(note(err.message)); }
   }
@@ -2524,9 +3566,6 @@
     } finally { waBusy = false; }
   }
 
-  // On a narrow screen one column shows at a time; on a wide one both are
-  // visible and this only decides which is emphasised.
-  const waSplit = () => document.querySelector(".wa-split");
   // Held on to rather than rebuilt: closing a conversation puts this same
   // empty state back, instead of the bare line of text it used to leave.
   const waPickEmpty = $("waPickEmpty");
@@ -2542,30 +3581,15 @@
     stopQuoting();
     $("waBack").hidden = false;
     markOpenRow(id);
-    waSplit().dataset.open = "thread";
-    pushThread();
+    waPane.open();              // on a phone this is a screen, so back returns
     $("waPanel").replaceChildren(note("Opening…"));
     // Only the thread: the list is already on screen and unchanged.
     if (!waBusy) { waBusy = true; loadWaThread(true).finally(() => { waBusy = false; }); }
   }
 
-  // On a phone the list and the conversation are a screen each, so opening one
-  // is a navigation and the phone's own back gesture has to come back to the
-  // list rather than leave the dashboard altogether. Nothing is pushed on a
-  // wide screen, where both panes are visible and back would mean nothing.
-  //
-  // `window.history` spelled out: `history` is taken in this scope by the
-  // assistant's own transcript.
-  const onePane = () => window.matchMedia("(max-width: 900px)").matches;
-  function pushThread() {
-    if (onePane() && !(window.history.state || {}).waThread) {
-      window.history.pushState({ waThread: true }, "");
-    }
-  }
-  window.addEventListener("popstate", () => {
-    if (waSplit() && waSplit().dataset.open === "thread") backToList();
-  });
-
+  // Closing the conversation. The pane itself — the attribute, the history
+  // entry — is makePane's business; this is everything else that has to go
+  // back to how it was.
   function backToList() {
     waChat = null;
     $("assistantPane").hidden = true;
@@ -2576,7 +3600,6 @@
     $("waWho").textContent = "Pick a conversation";
     $("waWhoFace").replaceChildren();
     stopQuoting();
-    waSplit().dataset.open = "list";
     // Instant: the list never went anywhere, so there is nothing to refetch.
     $("waPanel").replaceChildren(waPickEmpty);
     markOpenRow("");
@@ -2585,10 +3608,7 @@
   // Going back through the button has to spend the history entry that opening
   // the conversation pushed, or the phone's own back gesture would need two
   // presses to leave a list that is already showing.
-  $("waBack").onclick = () => {
-    if ((window.history.state || {}).waThread) window.history.back();
-    else backToList();
-  };
+  $("waBack").onclick = () => waPane.back();
   // Drag the divider to give either side more room. Kept per browser, because
   // how much list you want is a matter of what you are doing right now.
   const LIST_MIN = 240, LIST_MAX = 680, LIST_DEFAULT = 400;
