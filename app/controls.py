@@ -1,7 +1,7 @@
 """Owner controls: auto-reply kill switch, per-contact modes, activity feed."""
 import os
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -77,6 +77,20 @@ class DefaultModeRequest(BaseModel):
     mode: Literal["auto", "hold", "ignore"]
 
 
+# How many people one call may carry. The dashboard sends whichever names are
+# selected, and "select all" on an unfiltered list is the whole address book,
+# so the ceiling has to clear several hundred to be worth having. Past that it
+# is a script or a mistake rather than a person choosing contacts, and it keeps
+# the work per request bounded: one lookup each against a single read of
+# contacts.json, then one transaction.
+MAX_BULK_NAMES = 500
+
+
+class ModesRequest(BaseModel):
+    names: list[Annotated[str, Field(min_length=1, max_length=60)]] = Field(min_length=1, max_length=MAX_BULK_NAMES)
+    mode: Literal["auto", "hold", "ignore"]
+
+
 def _status() -> dict:
     return {"auto_reply": db.auto_reply_enabled(), "direct_send": db.direct_send_enabled(),
             "self_log": db.self_log_enabled(), "held": db.pending_count()}
@@ -149,6 +163,59 @@ def change_mode(body: ModeRequest):
     db.log("mode_changed", f"{canonical}: {body.mode}")
     log_event("mode_changed", mode=body.mode)
     return {"name": canonical, "mode": body.mode}
+
+
+def resolve_names(names: list[str]) -> tuple[list[str], list[str]]:
+    """Split the names asked for into the ones contacts.json knows and the rest.
+
+    contacts.canonical() is the rule — match ignoring case and surrounding
+    space, return the name exactly as stored — but it re-reads the file on
+    every call, and this route may be handed hundreds of names. So the book is
+    read once and that rule applied to it, the way readable_who() takes a book
+    for a whole page rather than one row.
+
+    Both lists keep the order they were sent in and hold no duplicates, so the
+    count of names written matches the length of the first one.
+    """
+    book = {stored.strip().lower(): stored for stored in contacts.load()}
+    known: list[str] = []
+    unknown: list[str] = []
+    for name in names:
+        stored = book.get(name.strip().lower())
+        if stored is None:
+            if name not in unknown:
+                unknown.append(name)
+        elif stored not in known:
+            known.append(stored)
+    return known, unknown
+
+
+@router.post("/api/contacts/modes", dependencies=AUTH)
+def change_modes(body: ModesRequest):
+    """Make one choice for many people at once.
+
+    One person per request meant an address book of hundreds took hundreds of
+    requests to set up. A name that matches nobody comes back in "unknown"
+    instead of being stored: a mode row is keyed on the name, so a typo would
+    write a row no chat ever matches and quietly do nothing, and nobody reads
+    twenty confirmations to notice. "changed" is what was really written.
+    """
+    known, unknown = resolve_names(body.names)
+    changed = db.set_modes(known, body.mode) if known else 0
+
+    if changed:
+        # One summary row rather than one per person: a few hundred rows would
+        # push everything else out of the activity feed. The kind is
+        # "mode_changed" because the feed already reads that kind as
+        # "<target>: <mode in words>", so this arrives as "7 people: Reply
+        # automatically" instead of a key only this file was meant to see.
+        db.log("mode_changed", f"{changed} {'person' if changed == 1 else 'people'}: {body.mode}")
+    # "auto" is the one that answers people with no approval of yours, so doing
+    # it to a selection is the change worth finding in the logs afterwards.
+    # Counts only: names and numbers stay out of them.
+    log_event("modes_changed", level="warning" if body.mode == "auto" else "info",
+              mode=body.mode, changed=changed, unknown=len(unknown))
+    return {"changed": changed, "mode": body.mode, "unknown": unknown}
 
 
 @router.get("/api/audit", dependencies=AUTH)
