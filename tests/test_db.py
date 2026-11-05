@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_transition_is_atomic(fresh_db):
     item = fresh_db.add_held("1@c.us", "hi", "hello", reason="needs_owner")
     assert fresh_db.transition(item, "pending", "sending") is True
@@ -75,7 +78,8 @@ def test_old_database_is_migrated(tmp_path, monkeypatch):
     ).connection.commit()
     monkeypatch.setattr(db, "DB_PATH", path)
     db.init()
-    assert db.get(db.add_held("1@c.us", "a", "b", reason="x"))["reason"] == "x"
+    row = db.get(db.add_held("1@c.us", "a", "b", reason="x", why="because", push_name="Kevo"))
+    assert (row["reason"], row["why"], row["push_name"]) == ("x", "because", "Kevo")
 
 
 def test_message_log_filters_and_order(fresh_db):
@@ -103,3 +107,53 @@ def test_direct_send_defaults_to_on(fresh_db):
     assert fresh_db.direct_send_enabled() is True
     fresh_db.set_setting("direct_send", "0")
     assert fresh_db.direct_send_enabled() is False
+
+
+def test_a_held_row_keeps_the_name_the_sender_chose(fresh_db):
+    item = fresh_db.add_held("1@c.us", "hi", "hello", push_name="Kevo Mech")
+    assert fresh_db.get(item)["push_name"] == "Kevo Mech"
+    # Nothing supplied is an empty string, not a null the card has to defend against.
+    assert fresh_db.get(fresh_db.add_held("1@c.us", "hi", "hello"))["push_name"] == ""
+
+
+def test_pending_in_chat_sees_one_conversation_and_only_what_is_still_waiting(fresh_db):
+    older = fresh_db.add_held("1@c.us", "a", "r")
+    newer = fresh_db.add_held("1@c.us", "b", "r")
+    theirs = fresh_db.add_held("2@c.us", "c", "r")
+    handled = fresh_db.add_held("1@c.us", "d", "r")
+    fresh_db.transition(handled, "pending", "dismissed")
+
+    assert [r["id"] for r in fresh_db.pending_in_chat("1@c.us")] == [newer, older]
+    assert [r["id"] for r in fresh_db.pending_in_chat("2@c.us")] == [theirs]
+    # A draft with no conversation has no neighbours to be confused with.
+    assert fresh_db.pending_in_chat("") == []
+
+
+def test_set_modes_writes_a_whole_selection_at_once(fresh_db):
+    assert fresh_db.set_modes(["Mom", "Dad", "Lulu"], "hold") == 3
+    assert fresh_db.all_modes() == {"mom": "hold", "dad": "hold", "lulu": "hold"}
+
+
+def test_set_modes_normalises_and_de_duplicates_the_names(fresh_db):
+    """Stored the way set_mode stores them, so the two cannot disagree about
+    whose row a choice belongs to."""
+    assert fresh_db.set_modes([" Mom ", "mom", "MOM", "", "   "], "auto") == 1
+    assert fresh_db.all_modes() == {"mom": "auto"} and fresh_db.get_mode("Mom") == "auto"
+
+
+def test_set_modes_rejects_a_mode_it_does_not_know_and_writes_nothing(fresh_db):
+    with pytest.raises(ValueError):
+        fresh_db.set_modes(["Mom", "Dad"], "bogus")
+    assert fresh_db.all_modes() == {}
+
+
+def test_set_modes_replaces_an_earlier_choice(fresh_db):
+    fresh_db.set_mode("Mom", "auto")
+    assert fresh_db.set_modes(["Mom", "Dad"], "ignore") == 2
+    assert fresh_db.get_mode("Mom") == "ignore" and fresh_db.get_mode("Dad") == "ignore"
+
+
+def test_set_modes_with_nothing_to_write_writes_nothing(fresh_db):
+    assert fresh_db.set_modes([], "hold") == 0
+    assert fresh_db.set_modes(["", "  "], "hold") == 0
+    assert fresh_db.all_modes() == {}

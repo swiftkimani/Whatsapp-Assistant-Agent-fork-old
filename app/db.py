@@ -47,6 +47,14 @@ def init() -> None:
         _add_column(c, "held", "number", "TEXT DEFAULT ''")
         # The model's own one-line account of why it held, for the owner to read.
         _add_column(c, "held", "why", "TEXT DEFAULT ''")
+        # The display name the sender chose for themselves, as WhatsApp reports
+        # it. Only ever read back as text: it is a stranger's own words, so it
+        # is stored and used as a bound parameter and never built into SQL.
+        _add_column(c, "held", "push_name", "TEXT DEFAULT ''")
+        # Sent and dismissed rows are kept for ever, so the queue's own reads —
+        # which run on every dashboard poll and ask only for the pending ones,
+        # sometimes in one conversation — would scan a table that only grows.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_held_pending ON held (status, chat_id, id)")
         c.execute("""CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT, target TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS messages (
@@ -64,12 +72,12 @@ def init() -> None:
 # ---- held replies ----
 
 def add_held(chat_id: str, incoming: str, reply: str, reason: str = "",
-             number: str | None = None, why: str = "") -> int:
+             number: str | None = None, why: str = "", push_name: str = "") -> int:
     with _db() as c:
         cur = c.execute(
-            "INSERT INTO held (ts, chat_id, incoming, reply, reason, number, why) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (time.time(), chat_id, incoming, reply, reason, number or "", why))
+            "INSERT INTO held (ts, chat_id, incoming, reply, reason, number, why, push_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (time.time(), chat_id, incoming, reply, reason, number or "", why, push_name or ""))
         return cur.lastrowid
 
 
@@ -84,6 +92,22 @@ def pending(limit: int = 50) -> list[dict]:
     with _db() as c:
         rows = c.execute("SELECT * FROM held WHERE status = 'pending' ORDER BY id DESC LIMIT ?",
                          (max(1, min(limit, 500)),))
+        return [dict(r) for r in rows]
+
+
+def pending_in_chat(chat_id: str) -> list[dict]:
+    """Every reply still waiting in one conversation, newest first.
+
+    Uncapped, unlike pending(): the caller is resolving one conversation's
+    duplicate drafts, and a limit there would leave the rows past it pending
+    for ever — the very thing that resolution exists to prevent. A single
+    conversation's unanswered drafts are bounded by how fast one person texts.
+    """
+    if not chat_id:
+        return []
+    with _db() as c:
+        rows = c.execute("SELECT * FROM held WHERE status = 'pending' AND chat_id = ? ORDER BY id DESC",
+                         (chat_id,))
         return [dict(r) for r in rows]
 
 
@@ -168,6 +192,29 @@ def set_mode(name: str, mode: str) -> None:
     with _db() as c:
         c.execute("INSERT INTO contact_modes (name, mode) VALUES (?, ?) "
                   "ON CONFLICT(name) DO UPDATE SET mode = excluded.mode", (name.strip().lower(), mode))
+
+
+def set_modes(names: list[str], mode: str) -> int:
+    """Record one choice for many people at once. Returns how many rows were written.
+
+    One transaction for the whole selection: choosing forty people and having
+    half of them take the setting is worse than none of them taking it, because
+    nothing on the page then says which half. Names are normalised and
+    de-duplicated exactly as set_mode does it, so the two cannot disagree about
+    who a row belongs to.
+    """
+    if mode not in MODES:
+        raise ValueError(f"bad mode: {mode}")
+    # dict.fromkeys de-duplicates and keeps the order the owner picked them in,
+    # which is what any report of "wrote 3" should be able to list back.
+    wanted = list(dict.fromkeys(n.strip().lower() for n in names if (n or "").strip()))
+    if not wanted:
+        return 0
+    with _db() as c:
+        c.executemany("INSERT INTO contact_modes (name, mode) VALUES (?, ?) "
+                      "ON CONFLICT(name) DO UPDATE SET mode = excluded.mode",
+                      [(name, mode) for name in wanted])
+    return len(wanted)
 
 
 def clear_mode(name: str) -> None:

@@ -95,6 +95,12 @@ class IncomingMessage(BaseModel):
     media_base64: str | None = None
     mimetype: str | None = None
     number: str | None = None    # phone number resolved by the bridge (for @lid contacts)
+    # The sender's own WhatsApp display name, when the bridge could read it.
+    # Bounded here because it is a name a stranger chose for themselves: it is
+    # stored and rendered as text only, never concatenated into SQL, a path or
+    # a command, and it never decides anything — the allowlist and the
+    # per-contact mode both key on contacts.json, not on this.
+    push_name: str | None = Field(default=None, max_length=120)
 
 
 def _require_bridge(token: str) -> None:
@@ -176,7 +182,8 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
 
     if action == "hold":
         db.add_held(msg.from_, result["resolved_text"], result["reply_text"],
-                    reason=reason, number=msg.number, why=result.get("why", ""))
+                    reason=reason, number=msg.number, why=result.get("why", ""),
+                    push_name=msg.push_name or "")
         db.log("held", msg.from_)
         db.log_message(msg.from_, name, "in", result["resolved_text"], "held")
         log_event("held", chat=anon(msg.from_), reason=reason)

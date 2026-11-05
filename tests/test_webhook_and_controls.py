@@ -193,3 +193,19 @@ def test_a_conversation_is_named_in_words_the_owner_recognises(signed_in, agent,
     assert readable_who("120363111122223333@g.us", "", book) == "A group"
     assert readable_who("", "", book) == "From this dashboard"
     assert readable_who("254799999999@c.us", "Otieno", book) == "Otieno"  # stored wins
+
+
+def test_the_display_name_the_sender_chose_travels_onto_the_held_draft(signed_in, agent, fresh_db):
+    """The bridge reads it off the message; the card falls back to it when the
+    owner never saved this person. Bounded on the way in, because it is a name
+    a stranger chose for themselves."""
+    agent.update(action="hold", hold_reason="needs_owner")
+    sender = {"from": "999888777666555@lid", "number": "254712345678", "push_name": "Kevo Mech"}
+    assert signed_in.post("/webhook", json=msg(**sender), headers=HEADERS).json()["action"] == "hold"
+
+    assert fresh_db.pending()[0]["push_name"] == "Kevo Mech"
+    assert signed_in.get("/api/held").json()["items"][0]["from"] == "Kevo Mech"
+    # A webhook that sends none, or an empty one, is the normal case and stores "".
+    assert signed_in.post("/webhook", json=msg(), headers=HEADERS).json()["action"] == "hold"
+    assert fresh_db.pending()[0]["push_name"] == ""
+    assert signed_in.post("/webhook", json=msg(push_name="x" * 121), headers=HEADERS).status_code == 422
