@@ -12,10 +12,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import db, groups, live, quiet_hours
+from app import db, groups, live, notify, quiet_hours
 from app.agent_graph import run_agent
 from app.approvals import router as approvals_router
 from app.assistant import router as assistant_router
+from app.notify import router as notify_router
+from app.quality import router as quality_router
 from app.style_learning import router as style_router
 import httpx
 
@@ -34,6 +36,8 @@ app.include_router(assistant_router)
 app.include_router(approvals_router)
 app.include_router(controls_router)
 app.include_router(style_router)
+app.include_router(quality_router)
+app.include_router(notify_router)
 db.init()
 
 REPLY_WITH_VOICE = os.getenv("REPLY_WITH_VOICE", "false") == "true"
@@ -292,6 +296,11 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         # So the draft appears beside the conversation at once, rather than
         # waiting in a tab the owner has to remember to open.
         live.publish(msg.from_, kind="draft")
+        # And tell him somewhere he will actually see it. A queue nobody is
+        # told about is a queue that does not get worked, and every safety
+        # decision in this project assumes he works it. Cheap, never raises,
+        # and does quiet hours, both switches and both rate limits itself.
+        notify.notify_draft_waiting(msg.from_, name or "")
         return {"action": "hold", "reply_text": result["reply_text"], "reason": reason}
 
     add_assistant_message(msg.from_, result["reply_text"])
