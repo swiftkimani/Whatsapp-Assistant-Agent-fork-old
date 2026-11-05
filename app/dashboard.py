@@ -776,6 +776,29 @@ async def wa_forward(body: ForwardRequest):
     return await _message_action("/forward", body.model_dump())
 
 
+class MarkReadRequest(BaseModel):
+    """Which conversation, and which way. A chat rather than a message, so it
+    does not inherit MessageAction's message id."""
+    chat_id: str = Field(pattern=ANY_CHAT_ID)
+    read: bool = True
+
+
+@router.post("/api/wa/mark-read", dependencies=[Depends(require_auth)])
+async def wa_mark_read(body: MarkReadRequest):
+    """Clear a conversation's unread badge, or put it back.
+
+    Opening a thread in the pane deliberately sends no read receipt, so until
+    now nothing could clear a badge except answering that person -- every chat
+    the owner had read here still counted as unread.
+
+    It stays an explicit action rather than something opening a chat does,
+    because marking read sends two blue ticks to the other person. That is a
+    statement about the owner to somebody else, and it should be theirs to
+    make each time rather than a side effect of looking at the list.
+    """
+    return await _message_action("/mark-read", body.model_dump())
+
+
 @router.post("/api/wa/star", dependencies=[Depends(require_auth)])
 async def wa_star(body: StarRequest):
     return await _message_action("/star", body.model_dump())

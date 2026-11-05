@@ -41,7 +41,7 @@ def bridge(monkeypatch):
 
 PROTECTED = [("get", "/api/wa/chats"), ("get", "/api/wa/thread?chat_id=1@c.us"),
              ("post", "/api/wa/reply"), ("post", "/api/wa/send-sticker"),
-             ("get", "/api/wa/stream")]
+             ("post", "/api/wa/mark-read"), ("get", "/api/wa/stream")]
 
 
 @pytest.mark.parametrize("method,path", PROTECTED)
@@ -335,3 +335,42 @@ def test_a_mode_that_is_not_one_of_the_three_is_refused(signed_in, bridge, fresh
     r = signed_in.post("/api/wa/assistant", json={
         "chat_id": "254712345678@c.us", "name": "Jane", "mode": "send_everything"})
     assert r.status_code == 422
+
+
+# ---- the unread badge ----
+# Opening a thread sends no read receipt on purpose, so before this there was
+# no way at all to clear a badge except by answering that person.
+
+def sent_to(bridge, path):
+    """The payloads the bridge was handed for one route."""
+    return [c["payload"] for c in bridge.calls if c["path"] == path]
+
+
+def test_a_chat_can_be_marked_read(signed_in, bridge):
+    bridge.replies["/mark-read"] = (200, {"status": "read"})
+    r = signed_in.post("/api/wa/mark-read", json={"chat_id": "254712345678@c.us"})
+    assert r.status_code == 200 and r.json()["status"] == "read"
+    assert sent_to(bridge, "/mark-read") == [{"chat_id": "254712345678@c.us", "read": True}]
+
+
+def test_a_chat_can_be_put_back_to_unread(signed_in, bridge):
+    """The phone can do this, so the dashboard must not be the thing that
+    takes it away: a badge is how the owner remembers to come back."""
+    bridge.replies["/mark-read"] = (200, {"status": "unread"})
+    r = signed_in.post("/api/wa/mark-read",
+                       json={"chat_id": "254712345678@c.us", "read": False})
+    assert r.status_code == 200 and r.json()["status"] == "unread"
+    assert sent_to(bridge, "/mark-read")[0]["read"] is False
+
+
+def test_a_refusal_from_whatsapp_is_passed_through_in_its_own_words(signed_in, bridge):
+    bridge.replies["/mark-read"] = (409, {"error": "WhatsApp would not mark this chat read"})
+    r = signed_in.post("/api/wa/mark-read", json={"chat_id": "254712345678@c.us"})
+    assert r.status_code == 409
+    assert "would not mark" in r.json()["detail"]
+
+
+def test_a_chat_id_that_is_not_one_is_refused_before_the_bridge_is_called(signed_in, bridge):
+    r = signed_in.post("/api/wa/mark-read", json={"chat_id": "not-a-chat"})
+    assert r.status_code == 422
+    assert sent_to(bridge, "/mark-read") == []

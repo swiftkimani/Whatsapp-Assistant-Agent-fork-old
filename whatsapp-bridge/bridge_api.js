@@ -22,7 +22,11 @@ const ROUTES = ["/send-text", "/send-location", "/send-reply", "/send-sticker",
   // WhatsApp's own message menu, the half of it that has to happen on this
   // side. Reply is "/send-reply" and already above; Copy never leaves the
   // browser; Report is a moderation action this assistant does not take.
-  "/react", "/forward", "/star", "/pin-message", "/delete-message"];
+  "/react", "/forward", "/star", "/pin-message", "/delete-message",
+  // Clearing a chat's unread badge, which nothing could do before: opening a
+  // thread here deliberately sends no read receipt, so every badge the pane
+  // showed stayed until the owner answered that person.
+  "/mark-read"];
 // The five above, which share their first three checks and their lookup.
 const MESSAGE_ACTIONS = ["/react", "/forward", "/star", "/pin-message", "/delete-message"];
 // Everything except /link-status needs a linked account. /link-status is the
@@ -332,6 +336,30 @@ function startBridgeApi(client, link, { queue = null } = {}) {
             chat: { id: chatId, name: shapeChats([chat], { limit: 1 })[0].name, is_group: Boolean(chat.isGroup) },
             messages,
           });
+        }
+
+        // ---- the unread badge ----
+        // Separate from /thread on purpose, and asked for explicitly rather
+        // than done on open. sendSeen() sends a read receipt: the other person
+        // sees two blue ticks, which is a message about the owner, not from
+        // them -- so it is their decision each time, not a side effect of
+        // looking. markUnread() puts the badge back, the way the phone does.
+        if (req.url === "/mark-read") {
+          const chatId = String(data.chat_id || "");
+          if (!CHAT_ID.test(chatId)) return reply(400, { error: "bad chat id" });
+          const read = data.read !== false;          // default is to mark read
+          const chat = await client.getChatById(chatId);
+          if (!chat) return reply(404, { error: "no such chat" });
+          // sendSeen resolves false when WhatsApp did not accept it, which is
+          // an ordinary answer for a chat the session cannot act in rather
+          // than a fault here.
+          const ok = read ? await chat.sendSeen() : await chat.markUnread();
+          console.log(`[act] /mark-read ${read ? "read" : "unread"} ok=${ok !== false}`);
+          if (ok === false) {
+            return reply(409, { error: read ? "WhatsApp would not mark this chat read"
+              : "WhatsApp would not mark this chat unread" });
+          }
+          return reply(200, { status: read ? "read" : "unread" });
         }
 
         // ---- one message's media, fetched only when the dashboard asks ----
