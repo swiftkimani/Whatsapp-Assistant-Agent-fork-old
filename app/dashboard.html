@@ -16,6 +16,11 @@
     --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s6:24px; --s8:32px;
     /* Type scale. Body is 16; 1.5 line-height body, 1.2 headings. */
     --f-xs:.75rem; --f-sm:.875rem; --f-md:1rem; --f-lg:1.125rem; --f-xl:1.25rem;
+    /* Not part of the reading scale: the two places an emoji is a picture
+       rather than text — the one a message is made of, drawn large the way
+       the phone draws it, and the ones you pick from. Nothing written in
+       words is ever set at either size. */
+    --f-emoji:2.5rem; --f-glyph:1.375rem;
     /* Radii, by element type: controls, cards, pills. */
     --r-sm:6px; --r-md:10px; --r-lg:16px; --r-pill:999px;
     /* Elevation, two levels. */
@@ -124,6 +129,12 @@
   .tabs button:hover{background:var(--surface-raised)}
   .tabs button[aria-selected="true"]{color:var(--primary-fg);background:var(--primary)}
   .badge{padding:0 var(--s1);border-radius:var(--r-pill);background:var(--danger);color:#fff;font-size:var(--f-xs);font-weight:600}
+  /* The unread count is also the way to clear it, so it is a real button --
+     but it has to keep looking like a count, not sprout a second style. */
+  button.badge{border:0;font-family:inherit;line-height:1.5;min-height:20px;min-width:20px;
+               transition:opacity var(--d-fast) var(--ease)}
+  button.badge:hover{opacity:.8}
+  button.badge[disabled]{opacity:.5}
   .tabs .badge{position:absolute;top:0;right:2px;min-width:16px;text-align:center;
                font-size:10px;line-height:16px;padding:0 3px}
   /* Sections at the top of the rail, you at the bottom — where WhatsApp puts
@@ -177,6 +188,13 @@
                  transition:transform var(--d-fast) var(--ease),background var(--d-fast) var(--ease)}
   .switch:checked{background:var(--primary);border-color:var(--primary)}
   .switch:checked::after{transform:translateX(18px);background:var(--primary-fg)}
+  /* A row whose control is a button rather than a switch, so it is a <div>:
+     the row itself does nothing and must not look like it does. */
+  div.srow{cursor:default}
+  div.srow button{flex:none;min-height:44px}
+  /* The one thing in this sheet that can be wrong rather than merely off, so
+     it is coloured like a warning instead of like a description. */
+  .srow-d.warn{color:var(--warning)}
   /* On a phone these two have no slot in the bottom bar, so this is the way
      to them. On a wide screen the rail already shows them and the group is
      simply a second route. */
@@ -359,8 +377,13 @@
   }
 
   #view-whatsapp{display:flex;flex-direction:column;min-height:0}
-  #waReply,.quoting{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
-  @media (max-width:900px){ #waReply,.quoting{margin-inline-start:0} }
+  #waReply,.quoting,.emoji-panel{margin-inline-start:calc(var(--wa-list-w) + var(--s3) + 7px)}
+  @media (max-width:900px){
+    #waReply,.quoting,.emoji-panel{margin-inline-start:0}
+    /* A phone has no room to spare beside it, and the panel is what the
+       thumb is on. */
+    .emoji-panel{max-width:none}
+  }
   /* The list leads, as it does in WhatsApp itself, and gets room for a real
      conversation name rather than three truncated words. */
   /* Width is a variable so the drag handle can move it and the reply bar can
@@ -460,6 +483,14 @@
   @keyframes found{0%,100%{box-shadow:none}25%,75%{box-shadow:0 0 0 3px var(--focus)}}
   .msg.found{animation:found 1.3s var(--ease)}
   .msg time{margin-top:0}
+  /* A message that is nothing but one to three emoji. The phone draws these
+     large and with no bubble at all — they are a picture, and a picture does
+     not sit in a speech bubble. The colour has to come back to the ordinary
+     text colour: on the owner's own side the bubble was the accent colour and
+     its foreground went with it. */
+  .msg.emoji-only{padding:0;background:transparent;border-color:transparent;color:var(--text)}
+  .msg.emoji-only .big-emoji{font-size:var(--f-emoji);line-height:1.15}
+  .msg.emoji-only time{color:var(--text-muted);opacity:1}
   .wa-row{padding-block:var(--s1)}
   .me{align-self:flex-end;background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
   .bot{align-self:flex-start;background:var(--surface-raised)}
@@ -573,9 +604,15 @@
            background:var(--surface);box-shadow:var(--e2)}
   .reactbar{display:flex;gap:var(--s1);padding:var(--s1);margin-bottom:var(--s1);
             border-bottom:1px solid var(--border)}
-  .reactbar button{width:36px;height:36px;display:grid;place-items:center;font-size:20px;
+  /* One emoji on a quiet round target. The quick reaction row and the
+     composer's picker are the two places this page shows a wall of emoji, and
+     they are the same control at two sizes: a row of six you aim at with a
+     mouse, and a grid you aim at with a thumb. */
+  .reactbar button,.emoji-cell{width:36px;height:36px;display:grid;place-items:center;
+                   font-size:var(--f-glyph);
                    line-height:1;border:0;border-radius:var(--r-pill);background:transparent}
-  .reactbar button:hover,.reactbar button:focus-visible{background:var(--surface-raised)}
+  .reactbar button:hover,.reactbar button:focus-visible,
+  .emoji-cell:hover,.emoji-cell:focus-visible{background:var(--surface-raised)}
   .menuitems{display:flex;flex-direction:column}
   .menuitems button{display:flex;gap:var(--s3);align-items:center;width:100%;min-height:40px;
                     padding:var(--s2) var(--s3);border:0;border-radius:var(--r-sm);
@@ -637,6 +674,35 @@
   #mic.rec{color:#fff;background:var(--danger);border-color:var(--danger)}
   #lang{padding:var(--s1) var(--s2);border-radius:var(--r-pill);font-size:var(--f-xs);font-weight:600;
         color:var(--text-muted);background:var(--surface);border:1px solid var(--border)}
+
+  /* ---- the emoji picker ----
+     In the column, above the quote bar, rather than floating over the thread.
+     On a phone a panel over the composer covers the message being answered —
+     which is the whole reason there is anything to type — so instead the
+     conversation shrinks by exactly the height of the picker, the way the
+     phone's own keyboard moves it. On a wide screen it keeps the width of a
+     panel you scan rather than stretching across the conversation. */
+  .emoji-panel{flex:none;display:flex;flex-direction:column;gap:var(--s2);
+       height:min(320px,42dvh);max-width:380px;padding:var(--s2);
+       background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
+  .emoji-find{display:flex;gap:var(--s2);align-items:center;flex:none}
+  .emoji-cats{flex:none}
+  /* Named rather than guessed at from the picture: "recent" above six faces
+     is the difference between a row of history and a row of suggestions. */
+  .emoji-head{flex:none;margin:0;font-size:var(--f-xs);font-weight:700;letter-spacing:.06em;
+       text-transform:uppercase;color:var(--text-muted)}
+  .emoji-recent{flex:none;display:flex;gap:var(--s1);overflow-x:auto;scrollbar-width:none}
+  .emoji-recent::-webkit-scrollbar{display:none}
+  /* A thumb's size here as well: this row is the first thing reached for, so
+     it cannot be the one row of small targets. */
+  .emoji-recent .emoji-cell{flex:none;width:44px;height:44px}
+  /* 44px cells: this is a grid aimed at with a thumb, not a row of six aimed
+     at with a mouse, so the targets are a thumb's size and the glyph inside
+     them is the same one the reaction row draws. */
+  .emoji-grid{flex:1;min-height:0;overflow-y:auto;display:grid;gap:var(--s1);
+       grid-template-columns:repeat(auto-fill,minmax(44px,1fr))}
+  .emoji-grid .emoji-cell{width:auto;height:44px}
+  .emoji-grid .note{grid-column:1/-1;margin:0}
 
   /* linking WhatsApp */
   .link-panel{margin:auto;text-align:center;max-width:360px;display:flex;flex-direction:column;
@@ -822,18 +888,41 @@
         </div>
       </div>
     </div>
+    <!-- Above the quote bar, below the conversation: the thread gives up the
+         height, so the message being answered is still on screen and the
+         quote bar still says which one it is. -->
+    <div id="emojiPicker" class="emoji-panel" hidden>
+      <div class="emoji-find">
+        <input id="emojiSearch" class="wa-search" type="search" autocomplete="off"
+               placeholder="Search emoji" aria-label="Search emoji by name">
+        <button id="emojiX" class="icon" type="button" aria-label="Close the emoji picker"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <p id="emojiRecentHead" class="emoji-head" hidden>Recent</p>
+      <div id="emojiRecent" class="emoji-recent" role="group" aria-label="Emoji you used recently" hidden></div>
+      <div id="emojiCats" class="wa-filters emoji-cats" role="group" aria-label="Kinds of emoji"></div>
+      <div id="emojiGrid" class="emoji-grid" role="group" aria-label="Emoji"></div>
+    </div>
     <div id="quoting" class="quoting" hidden>
       <div class="quote">
         <b id="quotingWho"></b><span id="quotingWhat" dir="auto"></span>
       </div>
       <button id="quotingX" class="icon" type="button" aria-label="Don't quote anything"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
+    <!-- Emoji and a sticker on the left of the box, send on the right, the way
+         WhatsApp Web has them. The picker itself is above: see .emoji-panel. -->
     <form id="waReply" hidden>
+      <button id="waEmoji" class="round" type="button" aria-expanded="false" aria-controls="emojiPicker"
+              aria-label="Emoji" title="Emoji"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></button>
+      <button id="waSticker" class="round" type="button" hidden
+              aria-label="Send a sticker" title="Send a sticker"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7l8-8V5a2 2 0 0 0-2-2z"/><path d="M13 21v-6a2 2 0 0 1 2-2h6"/></svg></button>
       <input id="waText" dir="auto" placeholder="Reply as yourself…" aria-label="Reply as yourself" autocomplete="off">
       <button class="round go" type="submit" aria-label="Send to this chat" title="Send">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
     </form>
+    <!-- Outside the form on purpose: it is a way of choosing a file, not a
+         field anything submits. -->
+    <input id="waStickerFile" type="file" accept="image/webp,image/png,image/jpeg" hidden>
   </section>
   </div>
 
@@ -1045,6 +1134,14 @@
         <span class="srow-d">Every reply she sends by herself is also copied into your own WhatsApp chat, so your phone shows what went out as you. The other person sees nothing extra.</span></span>
       <input id="copyBtn" class="switch" type="checkbox" role="switch">
     </label>
+
+    <h3 class="sheet-group">Her voice</h3>
+    <div class="srow">
+      <span class="srow-main"><span class="srow-t">Learn how I text</span>
+        <span class="srow-d" id="styleWhy">Checking what she is learning from…</span>
+        <span class="srow-d" id="styleNote" role="status" hidden></span></span>
+      <button id="styleLearn" class="ghost" type="button" disabled>Learn</button>
+    </div>
 
     <h3 class="sheet-group">Voice</h3>
     <label class="srow">
@@ -1385,7 +1482,13 @@
 
   // ---- the sheet: profile, every switch, the theme and signing out ----
   const sheet = $("sheet");
-  const openSheet = () => { if (!sheet.open) sheet.showModal(); };
+  const openSheet = () => {
+    if (!sheet.open) sheet.showModal();
+    // Read when the sheet opens rather than on every page load: this is the
+    // only place it is shown, and a learn run takes minutes, so a cached
+    // answer would be a lie by the time it is looked at.
+    if (!styleBusy) loadStyle();
+  };
   $("statusBtn").onclick = openSheet;
   $("profileBtn").onclick = openSheet;
   $("sheetClose").onclick = () => sheet.close();
@@ -2765,7 +2868,7 @@
     main.append(name, preview);
     const side = el("div", "wa-side");
     side.append(el("span", "wa-when", c.ts ? when(c.ts) : ""));
-    if (c.unread) side.append(el("span", "badge", unreadLabel(c.unread)));
+    if (c.unread) side.append(markReadButton(c));
     open.append(avatar(c.name, c.id), main, side);
     open.onclick = () => openWa(c.id, c.name);
     open.setAttribute("aria-label", `Open the conversation with ${c.name}`);
@@ -3186,9 +3289,18 @@
     // The quote comes first, as it does in WhatsApp: it is the context for
     // everything under it.
     if (m.quoted) bubble.append(quoteBlock(m));
-    if (m.kind) bubble.append(el("strong", "wa-kind", m.kind));
+    // A sticker is shown, not announced: WhatsApp puts no word above one, and
+    // "Sticker" written over the picture of a sticker is the kind of label a
+    // person reads once and never again. `kind` itself stays — the alt text,
+    // the download fallback and the "(no text)" branch all need it.
+    if (m.kind && m.render_as !== "sticker") bubble.append(el("strong", "wa-kind", m.kind));
+    // One to three emoji and nothing else. The phone draws those large and
+    // without a bubble; a reply that also quotes something keeps its bubble,
+    // because the quote needs somewhere to sit.
+    const bigEmoji = Boolean(m.emoji_only && !m.quoted);
+    if (bigEmoji) bubble.classList.add("emoji-only");
     if (m.body) {
-      const body = el("div", "", m.body);
+      const body = el("div", bigEmoji ? "big-emoji" : "", m.body);
       body.dir = "auto";
       bubble.append(body);
     } else if (!m.kind) {
@@ -3381,6 +3493,7 @@
 
   function showAssistant() {
     waChat = null;
+    closeEmoji(false);
     $("waWho").textContent = ASSISTANT_NAME;
     $("waWhoFace").replaceChildren(avatar(ASSISTANT_NAME));
     stopQuoting();
@@ -3468,6 +3581,36 @@
     markOpenRow($("assistantPane").hidden ? waChat : ASSISTANT);
   }
 
+  /** The unread count, and the only way to clear it.
+   *
+   *  Opening a conversation here deliberately sends no read receipt, so
+   *  before this nothing could clear a badge except answering that person.
+   *  It stays something you press rather than something opening a chat does,
+   *  because marking read sends two blue ticks to them -- that is a statement
+   *  about you, to somebody else, and it should not be a side effect of
+   *  looking at your own list. */
+  function markReadButton(c) {
+    const badge = btn(unreadLabel(c.unread), "badge");
+    badge.setAttribute("aria-label",
+      `Mark the conversation with ${c.name} as read. They will see you have read it.`);
+    badge.title = "Mark as read — sends a read receipt";
+    badge.onclick = async (event) => {
+      // The row behind it opens the conversation; this must not do both.
+      event.preventDefault();
+      event.stopPropagation();
+      badge.disabled = true;
+      try {
+        await api("/api/wa/mark-read", { chat_id: c.id });
+        c.unread = 0;              // so the list is right before the reload lands
+        await loadWaChats();
+      } catch (err) {
+        badge.disabled = false;
+        bubble("bot", err.message, true);
+      }
+    };
+    return badge;
+  }
+
   async function loadWaChats() {
     if (await showLinkIfNeeded()) return;
     try {
@@ -3534,6 +3677,7 @@
         : [note("Nothing here yet.")]));
       // The bridge refuses to send into a group, so do not offer a box that cannot.
       $("waReply").hidden = chat.is_group;
+      showComposerFor(chat);
       if (chat.is_group) panel.append(note("Replying to groups from here is switched off."));
       panel.scrollTop = toBottom || wasAtBottom ? panel.scrollHeight : keep;
       // Both of these need the thread to exist first: one looks for the
@@ -3572,6 +3716,7 @@
 
   function openWa(id, name) {
     waChat = id;
+    closeEmoji(false);
     $("assistantPane").hidden = true;
     $("waPanel").hidden = false;
     $("waWho").textContent = name;
@@ -3592,6 +3737,7 @@
   // back to how it was.
   function backToList() {
     waChat = null;
+    closeEmoji(false);
     $("assistantPane").hidden = true;
     $("waPanel").hidden = false;
     $("waAutoWrap").hidden = true;
@@ -3723,7 +3869,10 @@
     e.preventDefault();
     const box = $("waText"), text = box.value.trim();
     if (!text || !waChat) return;
-    const submit = e.submitter || $("waReply").querySelector("button");
+    // By type, not by position: the row starts with the emoji and sticker
+    // buttons now, and a submit with no submitter — Enter in the box, on the
+    // browsers that report none — would otherwise disable the wrong one.
+    const submit = e.submitter || $("waReply").querySelector("button[type=submit]");
     submit.disabled = true;
     try {
       await api("/api/wa/reply", {
@@ -3732,6 +3881,7 @@
       });
       box.value = "";
       stopQuoting();
+      closeEmoji(false);
       await loadWaThread(true);
     } catch (err) {
       $("waPanel").append(note(err.message));
@@ -3741,6 +3891,470 @@
       box.focus();
     }
   });
+
+  // ---- emoji, in the composer ----
+  // Emoji are characters, so there is nothing to fetch: no font file, no
+  // sprite sheet, no library. The list below is curated rather than generated
+  // — a few hundred of the ones a person actually sends — because a wall of
+  // every code point Unicode has is a worse way to find a thumbs-up than six
+  // rows of the things you use. Same control as the reaction row in the
+  // message menu, at a size a thumb can hit.
+  //
+  // One entry per emoji: the character, a space, then the words it answers to
+  // in the search box. A few carry an invisible U+FE0F after the character,
+  // which is what makes them draw as a picture rather than as text — so these
+  // are copied, not retyped.
+  const EMOJI_GROUPS = [
+    ["Smileys", [
+      "😀 grinning smile happy", "😄 grin laugh happy", "😂 tears of joy crying laughing",
+      "🤣 rolling laughing rofl", "🙂 slight smile", "😉 wink",
+      "😊 blush smile shy", "😍 heart eyes love", "😘 blowing a kiss",
+      "😅 sweat laugh relief", "🤔 thinking hmm", "😐 neutral straight face",
+      "🙄 rolling eyes", "😢 crying tear sad", "😭 sobbing crying loudly",
+      "😡 angry enraged mad", "🥳 party celebrate", "😴 sleeping asleep tired",
+      "❤️ red heart love", "💔 broken heart", "💯 hundred perfect",
+    ]],
+    ["Gestures", [
+      "👍 thumbs up yes like ok", "👎 thumbs down no", "👌 ok perfect",
+      "✌️ victory peace", "🤞 fingers crossed hope luck", "👏 clap applause bravo",
+      "🙏 pray thanks please", "🙌 raising hands praise", "👋 wave hello bye",
+      "🤝 handshake deal", "💪 muscle strong flex", "☝️ pointing up",
+      "🙋 raising a hand here", "🤷 shrug dunno", "🤦 facepalm",
+      "🙇 bowing sorry",
+    ]],
+    ["Nature", [
+      "🐶 dog puppy", "🐱 cat kitten", "🌹 rose flower",
+      "🌻 sunflower", "🌴 palm tree", "🍀 four leaf clover luck",
+      "☀️ sun sunny", "⛅ partly cloudy", "🌧️ rain raining",
+      "⚡ lightning power electricity", "🔥 fire hot lit", "🌈 rainbow",
+    ]],
+    ["Food", [
+      "☕ coffee hot drink", "🍵 tea", "🍞 bread",
+      "🍔 burger", "🍟 chips fries", "🍕 pizza",
+      "🍗 chicken drumstick", "🍚 rice", "🍲 stew pot",
+      "🥗 salad", "🍎 apple", "🍌 banana",
+      "🎂 birthday cake", "🍺 beer",
+    ]],
+    ["Travel", [
+      "🚗 car", "🚌 bus", "🚐 van matatu minibus",
+      "🏍️ motorbike", "🛵 scooter bodaboda", "🚲 bicycle bike",
+      "✈️ plane flight", "🚀 rocket launch", "📍 pin location place",
+      "🏠 house home", "🏢 office building", "🏥 hospital",
+      "🏫 school", "⛽ fuel petrol station",
+    ]],
+    ["Objects", [
+      "📱 phone mobile", "💻 laptop computer", "⌚ watch",
+      "💡 light bulb idea", "🔑 key", "💰 money bag",
+      "💳 card payment", "📦 parcel package box", "📝 memo note writing",
+      "📅 calendar date", "🎁 gift present", "🏆 trophy win",
+      "⚽ football soccer", "🎵 musical note music",
+    ]],
+    ["Symbols", [
+      "✅ tick check done yes", "❌ cross no wrong", "⚠️ warning caution",
+      "❗ exclamation important", "❓ question", "💬 speech bubble comment",
+      "🚫 prohibited banned", "➡️ right arrow", "🔴 red circle",
+      "🟢 green circle", "🆗 ok button", "♻️ recycle",
+    ]],
+  ];
+
+  // The character and the words it answers to, flattened once. Searching a
+  // few hundred strings on every keystroke is nothing; rebuilding this list
+  // on every keystroke would be waste.
+  const EMOJI_ALL = [];
+  const EMOJI_NAMES = new Map();
+  EMOJI_GROUPS.forEach(([, entries], group) => {
+    for (const entry of entries) {
+      const cut = entry.indexOf(" ");
+      const ch = entry.slice(0, cut), name = entry.slice(cut + 1);
+      EMOJI_ALL.push({ ch, name, group });
+      EMOJI_NAMES.set(ch, name);
+    }
+  });
+
+  // What you reached for last, which is what you are most likely to reach for
+  // next. Per browser, and every read and write guarded: localStorage throws
+  // outright in a private window, and a picker that cannot open is worse than
+  // one with no history.
+  const EMOJI_RECENT_KEY = "emojiRecent", EMOJI_RECENT_MAX = 16;
+  let emojiRecent = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(EMOJI_RECENT_KEY) || "[]");
+    if (Array.isArray(saved)) {
+      emojiRecent = saved.filter((c) => typeof c === "string" && c).slice(0, EMOJI_RECENT_MAX);
+    }
+  } catch { /* private mode, or something else wrote that key */ }
+
+  let emojiCat = 0;
+  const emojiTerm = () => $("emojiSearch").value.trim().toLowerCase();
+
+  /** One emoji on a round target, the same control as the reaction row. */
+  function emojiCell(ch) {
+    const cell = btn(ch, "emoji-cell");
+    cell.setAttribute("aria-label", EMOJI_NAMES.get(ch) || ch);
+    cell.title = EMOJI_NAMES.get(ch) || "";
+    cell.tabIndex = -1;                   // one tab stop per row; the arrows do the rest
+    cell.onclick = (event) => {
+      insertEmoji(ch);
+      // A mouse or a thumb: the caret is where you are going next, so focus
+      // follows it back to the box. A keyboard reports no click detail, and
+      // there you are picking with the arrows — leave focus where it is.
+      if (event.detail > 0) $("waText").focus();
+    };
+    return cell;
+  }
+
+  /** Each row of cells keeps exactly one tab stop, so Tab passes through the
+   *  picker instead of walking three hundred buttons. */
+  function rove(cell) {
+    const host = cell.closest(".emoji-recent,.emoji-grid");
+    if (!host) return;
+    for (const c of host.querySelectorAll(".emoji-cell")) c.tabIndex = c === cell ? 0 : -1;
+  }
+  const firstTabStop = (host) => {
+    const first = host.querySelector(".emoji-cell");
+    if (first) first.tabIndex = 0;
+  };
+
+  function paintEmojiRecent() {
+    const row = $("emojiRecent"), head = $("emojiRecentHead");
+    row.hidden = head.hidden = !emojiRecent.length;
+    row.replaceChildren(...emojiRecent.map(emojiCell));
+    firstTabStop(row);
+  }
+
+  function paintEmojiCats() {
+    const host = $("emojiCats");
+    if (!host.children.length) {
+      EMOJI_GROUPS.forEach(([label], i) => {
+        const b = btn(label, "");
+        b.onclick = () => { emojiCat = i; $("emojiSearch").value = ""; paintEmojiGrid(); };
+        host.append(b);
+      });
+    }
+    const searching = Boolean(emojiTerm());
+    [...host.children].forEach((b, i) =>
+      b.setAttribute("aria-pressed", String(!searching && i === emojiCat)));
+  }
+
+  function paintEmojiGrid() {
+    const term = emojiTerm();
+    const found = term
+      ? EMOJI_ALL.filter((e) => e.name.includes(term))
+      : EMOJI_ALL.filter((e) => e.group === emojiCat);
+    paintEmojiCats();
+    const grid = $("emojiGrid");
+    grid.replaceChildren(...(found.length
+      ? found.map((e) => emojiCell(e.ch))
+      : [note("No emoji answers to that.")]));
+    firstTabStop(grid);
+  }
+
+  function rememberEmoji(ch) {
+    const fromRecent = $("emojiRecent").contains(document.activeElement);
+    emojiRecent = [ch, ...emojiRecent.filter((c) => c !== ch)].slice(0, EMOJI_RECENT_MAX);
+    try { localStorage.setItem(EMOJI_RECENT_KEY, JSON.stringify(emojiRecent)); } catch { /* private mode */ }
+    paintEmojiRecent();
+    // The row it was just picked from has been rebuilt underneath it, so a
+    // keyboard would otherwise lose its place to the body element.
+    if (fromRecent) {
+      const again = [...$("emojiRecent").querySelectorAll(".emoji-cell")].find((c) => c.textContent === ch);
+      if (again) { again.focus(); rove(again); }
+    }
+  }
+
+  /** Put one emoji where the caret is. Appending would be wrong nearly every
+   *  time: the reason the picker is open is usually a half-written sentence. */
+  function insertEmoji(ch) {
+    const box = $("waText");
+    const from = box.selectionStart, to = box.selectionEnd;
+    if (typeof from === "number" && typeof to === "number") box.setRangeText(ch, from, to, "end");
+    else box.value += ch;        // no caret to speak of: the end is the honest place
+    rememberEmoji(ch);
+  }
+
+  /** How many cells a grid row holds right now, so Up and Down move a row
+   *  rather than a cell. Read off the grid itself: the column count is the
+   *  browser's to decide at this width, not ours to assume. */
+  function emojiColumns() {
+    const cols = getComputedStyle($("emojiGrid")).gridTemplateColumns;
+    return Math.max(1, cols.split(" ").filter(Boolean).length);
+  }
+
+  /** The arrow keys. Two lists, because the recent row is one row and the
+   *  grid is a grid: up out of the grid's first row lands on the recent row,
+   *  and up out of that lands on the search box. */
+  function moveEmojiFocus(key) {
+    const recent = [...$("emojiRecent").querySelectorAll(".emoji-cell")];
+    const grid = [...$("emojiGrid").querySelectorAll(".emoji-cell")];
+    const inRecent = recent.indexOf(document.activeElement);
+    const inGrid = grid.indexOf(document.activeElement);
+    const land = (node) => {
+      if (!node) return false;
+      node.focus();
+      if (node.classList.contains("emoji-cell")) rove(node);
+      return true;
+    };
+    if (inRecent >= 0) {
+      if (key === "ArrowRight") return land(recent[Math.min(inRecent + 1, recent.length - 1)]);
+      if (key === "ArrowLeft") return land(recent[Math.max(inRecent - 1, 0)]);
+      if (key === "ArrowDown") return land(grid[0]);
+      if (key === "ArrowUp") return land($("emojiSearch"));
+      if (key === "Home") return land(recent[0]);
+      if (key === "End") return land(recent[recent.length - 1]);
+      return false;
+    }
+    if (inGrid < 0) return false;
+    const cols = emojiColumns();
+    if (key === "ArrowRight") return land(grid[Math.min(inGrid + 1, grid.length - 1)]);
+    if (key === "ArrowLeft") return land(grid[Math.max(inGrid - 1, 0)]);
+    if (key === "ArrowDown") return land(grid[Math.min(inGrid + cols, grid.length - 1)]);
+    if (key === "Home") return land(grid[0]);
+    if (key === "End") return land(grid[grid.length - 1]);
+    if (key === "ArrowUp") {
+      if (inGrid >= cols) return land(grid[inGrid - cols]);
+      return land(recent[0]) || land($("emojiSearch"));
+    }
+    return false;
+  }
+
+  function openEmoji() {
+    const panel = $("emojiPicker");
+    if (!panel.hidden) return;
+    panel.hidden = false;
+    $("waEmoji").setAttribute("aria-expanded", "true");
+    paintEmojiRecent();
+    paintEmojiGrid();
+    // The search box first on a computer, where you are about to type the name
+    // of what you want. Not on a phone: focusing a text field raises the
+    // keyboard, and the keyboard would cover the picker that just opened.
+    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) $("emojiSearch").focus();
+    else land0();
+  }
+
+  const land0 = () => {
+    const first = $("emojiGrid").querySelector(".emoji-cell");
+    if (first) first.focus();
+  };
+
+  function closeEmoji(toBox) {
+    const panel = $("emojiPicker");
+    if (panel.hidden) return;
+    panel.hidden = true;
+    $("waEmoji").setAttribute("aria-expanded", "false");
+    $("emojiSearch").value = "";
+    if (toBox) $("waText").focus();
+  }
+
+  $("waEmoji").onclick = () => ($("emojiPicker").hidden ? openEmoji() : closeEmoji(true));
+  $("emojiX").onclick = () => closeEmoji(true);
+  $("emojiSearch").oninput = paintEmojiGrid;
+  $("emojiPicker").addEventListener("focusin", (event) => {
+    if (event.target.classList.contains("emoji-cell")) rove(event.target);
+  });
+  $("emojiPicker").addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();          // the message menu's own Escape is not this one
+      return closeEmoji(true);
+    }
+    if (event.target === $("emojiSearch")) {
+      const first = $("emojiGrid").querySelector(".emoji-cell");
+      if (!first) return;
+      // Enter on a search with an obvious answer puts it in the message,
+      // which is what you opened the search for.
+      if (event.key === "Enter") { insertEmoji(first.textContent); event.preventDefault(); }
+      else if (event.key === "ArrowDown") { first.focus(); event.preventDefault(); }
+      return;
+    }
+    if (moveEmojiFocus(event.key)) event.preventDefault();
+  });
+  // Escape out of the box as well, without leaving the box.
+  $("waText").addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || $("emojiPicker").hidden) return;
+    closeEmoji(false);
+    event.preventDefault();
+  });
+
+  // ---- a sticker, picked off this device ----
+  // The bounds below are the bridge's own, checked here so that picking the
+  // wrong file costs a sentence rather than a round trip and a refusal.
+  // 500 KB, and a WebP that is already sticker-sized: a WebP is sent as it
+  // is, so nothing resizes it on the way out. A PNG or a JPEG of any size
+  // under the cap is the safe choice — WhatsApp re-encodes those itself.
+  const STICKER_MAX_BYTES = 500 * 1024;
+  const STICKER_MAX_SIDE = 512;
+  const STICKER_TYPES = { "image/webp": "WebP", "image/png": "PNG", "image/jpeg": "JPEG" };
+
+  /** What the composer offers for this conversation. A sticker goes to one
+   *  person: the route refuses a group outright — "stickers go to one person"
+   *  — so in a group the button is not there to be pressed. */
+  function showComposerFor(chat) {
+    const group = Boolean(chat && (chat.is_group || String(chat.id || "").endsWith("@g.us")));
+    $("waSticker").hidden = group;
+    if (group) closeEmoji(false);
+  }
+
+  /** The size of a picture this browser can decode, or null if it cannot. */
+  const pictureSize = (file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    const done = (size) => { URL.revokeObjectURL(url); resolve(size); };
+    img.onload = () => done({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => done(null);
+    img.src = url;
+  });
+
+  const asBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    // The part after the comma, and nothing else: the route takes bare base64,
+    // because Node's own decoder reads a "data:" prefix as part of the picture
+    // rather than refusing it.
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("That file could not be read off this device."));
+    reader.readAsDataURL(file);
+  });
+
+  /** Say something under the conversation, where the reply box already says
+   *  its refusals. One line at a time, and the next repaint of the thread
+   *  clears it. */
+  function waSay(text, isError) {
+    const panel = $("waPanel");
+    panel.querySelectorAll(".wa-said").forEach((n) => n.remove());
+    const line = el("p", `note wa-said${isError ? " err" : ""}`, text);
+    line.setAttribute("role", "status");
+    line.dir = "auto";
+    panel.append(line);
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  $("waSticker").onclick = () => $("waStickerFile").click();
+
+  $("waStickerFile").onchange = async () => {
+    const input = $("waStickerFile"), file = input.files && input.files[0];
+    input.value = "";                     // so the same file can be picked twice
+    if (!file || !waChat) return;
+    const kind = (file.type || "").toLowerCase();
+    if (String(waChat).endsWith("@g.us")) {
+      return waSay("Stickers go to one person. The dashboard never sends to a group.", true);
+    }
+    // Said before the request rather than after a refusal: there is no ffmpeg
+    // and no WebP encoder on the server, so nothing here can turn a moving
+    // picture into a sticker.
+    if (kind === "image/gif" || kind.startsWith("video/")) {
+      return waSay("A GIF or a video cannot be turned into a sticker here. An animated sticker"
+        + " has to be an animated WebP file, which is sent exactly as it is.", true);
+    }
+    if (!STICKER_TYPES[kind]) {
+      return waSay("A sticker has to be a WebP, PNG or JPEG picture.", true);
+    }
+    if (file.size > STICKER_MAX_BYTES) {
+      return waSay(`That file is ${Math.round(file.size / 1024)} KB. A sticker has to be under`
+        + ` ${Math.round(STICKER_MAX_BYTES / 1024)} KB.`, true);
+    }
+    if (kind === "image/webp") {
+      const size = await pictureSize(file);
+      if (!size) {
+        return waSay("That file could not be read as a WebP picture here, so WhatsApp would not"
+          + " take it either.", true);
+      }
+      if (size.width > STICKER_MAX_SIDE || size.height > STICKER_MAX_SIDE) {
+        return waSay(`That WebP is ${size.width}×${size.height}. A sticker is`
+          + ` ${STICKER_MAX_SIDE}×${STICKER_MAX_SIDE} or smaller — send it as a PNG instead and`
+          + " WhatsApp will size it itself.", true);
+      }
+    }
+    const button = $("waSticker");
+    button.disabled = true;
+    waSay("Sending the sticker…");
+    try {
+      await api("/api/wa/send-sticker", { chat_id: waChat, mimetype: kind, data: await asBase64(file) });
+      // Nothing is written to the message log for a sticker, so the thread
+      // itself is where it appears.
+      await loadWaThread(true);
+      waSay(`${STICKER_TYPES[kind]} sticker sent.`);
+    } catch (err) {
+      // Every refusal this route makes is already a sentence written to be
+      // read — the canvas, the weight, the three second pause between two of
+      // them, the account's own ceiling — so it is shown as it arrived.
+      waSay(err.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  // ---- how she writes: learning the owner's voice from his own WhatsApp ----
+  // data/style_examples.md is the only thing in the whole prompt teaching her
+  // how he texts, and it shipped full of demo lines. That is not a setting
+  // that happens to be off: until it is dealt with she is imitating a
+  // fixture, so the row says so in those words and the action is the loud one.
+  const styleLearn = $("styleLearn");
+  let styleBusy = false;
+
+  /** "2 days ago". Relative because the only question anybody asks of this is
+   *  whether it was learned from the account as it is now. */
+  function since(ts) {
+    const secs = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    const mins = Math.round(secs / 60), hours = Math.round(mins / 60), days = Math.round(hours / 24);
+    if (secs < 90) return "just now";
+    if (mins < 60) return `${mins} ${mins === 1 ? "minute" : "minutes"} ago`;
+    if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+    if (days === 1) return "yesterday";
+    if (days < 30) return `${days} days ago`;
+    return `on ${new Date(ts * 1000).toLocaleDateString()}`;
+  }
+
+  function renderStyle(s) {
+    const why = $("styleWhy");
+    const problem = !s || s.is_placeholder || !s.lines;
+    why.className = `srow-d${problem && s ? " warn" : ""}`;
+    why.textContent = !s
+      ? "Whether she is writing from your own messages could not be read just now."
+      : s.is_placeholder
+        ? "She is copying the example lines this project shipped with, not yours. Until she reads"
+          + " your own chats she is writing in somebody else's voice."
+        : !s.lines
+          ? "Nothing is teaching her how you text yet, so she is guessing at it."
+          : `${s.lines} ${s.lines === 1 ? "line" : "lines"} of your own, learned`
+            + ` ${s.learned_at ? since(s.learned_at) : "at some point"}.`;
+    styleLearn.textContent = problem ? "Learn from my chats" : "Learn again";
+    styleLearn.className = problem && s ? "go" : "ghost";
+    styleLearn.disabled = styleBusy;
+  }
+
+  async function loadStyle() {
+    try { renderStyle(await api("/api/style/status")); }
+    catch { renderStyle(null); }
+  }
+
+  styleLearn.onclick = async () => {
+    const said = $("styleNote");
+    styleBusy = true;
+    styleLearn.disabled = true;
+    styleLearn.textContent = "Reading your chats…";
+    said.hidden = false;
+    said.className = "srow-d";
+    // It walks twenty-five conversations through a real WhatsApp Web session,
+    // one at a time. Minutes, not seconds — so it says so rather than leaving
+    // a disabled button to be stared at.
+    said.textContent = "Reading up to 25 of your one-to-one conversations through WhatsApp."
+      + " This takes a minute or two; you can leave this open.";
+    try {
+      const r = await api("/api/style/learn", {});
+      said.textContent = `Learned ${r.lines} ${r.lines === 1 ? "line" : "lines"} from`
+        + ` ${r.chats_read} ${r.chats_read === 1 ? "chat" : "chats"}, out of ${r.pairs}`
+        + ` ${r.pairs === 1 ? "message she can look up" : "messages she can look up"}.`
+        + (r.backed_up ? ` What was there before was copied to ${r.backed_up}.` : "")
+        + " She writes this way from her very next reply.";
+      bubble("bot", said.textContent);
+    } catch (err) {
+      // 502 when the bridge cannot be reached, 422 when there was nothing in
+      // those conversations to learn from. Both arrive as sentences for him.
+      said.className = "srow-d warn";
+      said.textContent = err.message;
+    } finally {
+      styleBusy = false;
+      await loadStyle();        // the row and the button come back from the truth
+    }
+  };
 
   // ---- dictation: record, transcribe on the server (Whisper) ----
   const micBtn = $("mic"), langBtn = $("lang");
