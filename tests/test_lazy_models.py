@@ -9,12 +9,19 @@ the eviction tests drive the real app/stt.py with a stand-in for the model
 class — the suite is meant to stay offline and deterministic, and a real
 "small" Whisper is 610 MiB.
 
+The same discipline covers the remote transcription provider: app/stt_gemini.py
+is reached through a function in app/stt.py, so a backend that answers text
+messages imports neither it nor the Google SDK somebody may one day replace its
+REST call with. tests/test_stt_gemini.py tests what that provider does; this
+file only holds the line about when it is imported.
+
 There used to be a second half to this file, for BLIP. The captioner is gone
 (photos are now sent to the model as images), and with it torch and
 transformers; Pillow is the one library left that app/vision.py must not
 import until a photo actually arrives.
 """
 import importlib.util
+import os
 import subprocess
 import sys
 import time
@@ -26,6 +33,19 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HEAVY = ("faster_whisper", "ctranslate2", "PIL")
+
+# The same rule, for the transcription provider that is not local. app/stt.py
+# reaches app/stt_gemini.py through a function, so neither the provider module
+# nor anything it might one day import is in a process that only answers text
+# messages. The Google names are listed although nothing imports them today:
+# this is the test that has to fail the day somebody "tidies up" the REST call
+# in app/stt_gemini.py into google-genai, which would put google-auth,
+# protobuf and grpcio in the boot path of every backend.
+#
+# "google" is the namespace package every Google library installs into, so
+# naming it covers the SDKs that do not exist yet as well as the ones that do.
+REMOTE = ("app.stt_gemini", "google", "google.genai", "google.generativeai",
+          "googleapiclient", "grpc", "proto")
 
 
 def _load_real_module(name: str):
@@ -54,6 +74,27 @@ def test_importing_the_agent_graph_does_not_import_the_heavy_libraries():
     )
     done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT,
                           capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "", f"imported from boot: {done.stdout.strip()}"
+
+
+def test_importing_the_app_does_not_import_a_transcription_provider():
+    """Measured in a subprocess for the same reason as the test above, and
+    through app.main rather than app.agent_graph because app.main is what the
+    container runs and what imports app.stt directly as well.
+
+    STT_PROVIDER is set to gemini here on purpose: the provider being switched
+    on must not be the thing that decides when its module is imported, or the
+    saving quietly disappears on the one deployment that uses it."""
+    code = (
+        "import sys\n"
+        "import app.main\n"
+        f"print(','.join(m for m in {REMOTE!r} if m in sys.modules))\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT,
+                          capture_output=True, text=True, timeout=120,
+                          env={**os.environ, "STT_PROVIDER": "gemini",
+                               "GEMINI_API_KEY": "not-a-real-key"})
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "", f"imported from boot: {done.stdout.strip()}"
 

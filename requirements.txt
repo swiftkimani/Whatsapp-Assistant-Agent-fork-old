@@ -33,8 +33,21 @@ langchain-core==0.3.9
 # never installed, and it would have cost about a gigabyte of resident memory
 # on a host that already swaps.
 
-# Speech-to-text (runs locally, free)
+# Speech-to-text (runs locally, free). Still here because STT_PROVIDER
+# defaults to whisper; with STT_PROVIDER=gemini nothing imports it and this
+# line, with ctranslate2 behind it and 138 MiB of "base" weights in the model
+# cache, is what the switch is really for. app/stt.py explains why there is no
+# automatic fall back to it, which is what makes removing it an option at all.
 faster-whisper==1.0.3
+
+# Gemini 3.5 Transcribe (STT_PROVIDER=gemini) adds NO dependency. It is one
+# POST to generativelanguage.googleapis.com with a JSON body and two headers,
+# and httpx -- already here, already used by app/main.py and by the Anthropic
+# SDK -- makes that call in four lines (app/stt_gemini.py). google-genai would
+# bring google-auth, protobuf, grpcio, websockets and more for the same
+# request, on a host that is already swapping, and would have to be kept out
+# of the boot path by hand; the only thing it would save is parsing one
+# response, which is three dict lookups.
 
 # Text-to-speech (free, no API key) — optional feature, off by default
 edge-tts==6.1.12

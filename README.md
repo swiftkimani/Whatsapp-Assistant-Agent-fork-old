@@ -14,6 +14,7 @@ An AI assistant that answers my WhatsApp messages in my own voice (Kenyan Englis
 - [The dashboard and Arianna](#the-dashboard-and-arianna)
 - [Safety design](#safety-design)
 - [Privacy and data flow](#privacy-and-data-flow)
+- [Transcription: Whisper or Gemini](#transcription-whisper-or-gemini)
 - [Setup](#setup)
 - [Configuration](#configuration)
 - [Tests and evaluation](#tests-and-evaluation)
@@ -111,9 +112,9 @@ Header switches: **Auto-reply** (kill switch), **Direct send**, **Voice chat**, 
 - "send my location to Mom" sends the position of the device the dashboard is open on.
 
 **Voice**
-- *Dictation:* faster-whisper on the server, with automatic English or Kiswahili detection.
+- *Dictation:* transcribed on the server by whichever `STT_PROVIDER` is set — faster-whisper locally by default, with automatic English or Kiswahili detection.
 - *Spoken replies:* free Microsoft voices (edge-tts) by default, or an instructable OpenAI voice with `TTS_PROVIDER=openai` (needs its own `OPENAI_API_KEY`; it falls back to the free voice if that fails).
-- *Wake word* ("Arianna"): uses the browser's speech service in Chrome or Edge; the question itself is transcribed by Whisper.
+- *Wake word* ("Arianna"): uses the browser's speech service in Chrome or Edge; the question itself is transcribed by the configured `STT_PROVIDER`.
 - An animated orb shows when Arianna is listening, thinking or speaking.
 
 Listing messages is a database query: **the model never reads message contents and it costs no tokens**. The page reads them aloud itself.
@@ -136,7 +137,7 @@ Listing messages is a database query: **the model never reads message contents a
 | Data | Where it goes |
 |---|---|
 | Incoming message text, my notes, schedule, recent conversation | **Claude API** (to write the reply) |
-| Voice notes | Transcribed **locally** (faster-whisper); the audio never leaves the machine |
+| Voice notes | Depends on `STT_PROVIDER`. **`whisper`** (the default): transcribed locally by faster-whisper, and the audio never leaves the machine. **`gemini`**: the audio is sent to Google's `gemini-3.5-transcribe`, and on the free tier [Google's terms](https://aistudio.google.com/docs/terms) say human reviewers may read and annotate what is sent — see [Transcription](#transcription-whisper-or-gemini) below |
 | Photos | Sent to the Claude API as an image, because a local captioner only ever produced a lossy English sentence about a picture the model can read itself |
 | Style matching | Word overlap over your own past replies, computed locally — no embedding model |
 | Held replies, conversation memory, message history, audit log | **Local SQLite** (`data/assistant.db`). Message history is deleted after `MESSAGE_RETENTION_DAYS` (default 30) |
@@ -146,6 +147,66 @@ Listing messages is a database query: **the model never reads message contents a
 `ALLOWED_CONTACTS` decides who reaches the assistant — a list of numbers, your address book, or `anyone`. Whoever
 reaches it is talking to software that imitates me, so I keep it for practical messages and hold personal ones. With
 `anyone`, that includes people who have never written before, which is worth being deliberate about.
+
+## Transcription: Whisper or Gemini
+
+Voice notes here are English, Kiswahili and Sheng, often switching inside one sentence. Sixteen
+WhatsApp-shaped clips were scored at every faster-whisper model size (`docs/host-memory.md`):
+
+| | Kenyan English | Kiswahili | Sheng |
+|---|---|---|---|
+| tiny | 0.02 | 1.34 | 0.97 |
+| base | 0.02 | 1.30 | 0.90 |
+| small | **0.01** | 1.26 | 0.85 |
+
+Word error rate. English is as good as it needs to be. **A rate above 1.0 means the transcript has
+more errors than the reference has words**, and one Swahili clip came back as fluent English with
+nothing to do with the audio. Model size is not the lever — a bigger Whisper is still the wrong
+model for this mix.
+
+`STT_PROVIDER` picks the transcriber:
+
+| | `whisper` (default) | `gemini` |
+|---|---|---|
+| Where the audio goes | nowhere — faster-whisper, on this machine | Google, `gemini-3.5-transcribe` |
+| Key | none | `GEMINI_API_KEY` |
+| Kiswahili / Sheng | unusable (above) | detects the language itself; documented for code-switching inside a sentence |
+| Cost | RAM: 138 MiB of weights resident between notes | free tier, or ~$0.005/minute paid |
+| Memory | `faster-whisper` + `ctranslate2` + the weights | an HTTP request |
+
+**The free tier is not private.** Google's [terms for unpaid use](https://aistudio.google.com/docs/terms)
+say human reviewers may read, annotate and process what you send, and say not to submit personal
+information. These are other people's voice notes, and they did not agree to that. A paid key is
+excluded from that use. Pick deliberately; `.env.example` says the same thing next to the setting.
+
+**When Gemini can't answer, the message is held — it never falls back to Whisper.** Not out of
+tidiness: Whisper's failure on this corpus is a *confident* wrong answer, and nothing downstream can
+catch a reply that is perfectly grounded in a sentence nobody said. Holding is also what lets the
+deployment drop `faster-whisper` and the weights entirely, which is the memory this switch is for.
+A held voice note reaches the Held tab like any other, and the reason is in the log.
+
+- **429** (the free tier's limits are low and change without notice): one retry, after a backoff
+  that honours `Retry-After` but caps it at 5s, then held.
+- **Timeout** (`GEMINI_STT_TIMEOUT`, 30s): held without a retry. A second 30s attempt is what would
+  push the webhook past the bridge's 180s ceiling, and the reply still has to be written after this.
+- **No key, or `STT_PROVIDER` unset:** the local path runs exactly as before. Nothing raises; the
+  missing key is logged once, not once per message.
+- **A malformed, unfinished or empty response:** held with a reason, never read as silence.
+
+### Measuring it on your own language mix
+
+```bash
+venv/bin/python3 scripts/measure_whisper.py --score whisper            # the local baseline
+venv/bin/python3 scripts/measure_whisper.py --score gemini --pause 4   # needs GEMINI_API_KEY
+```
+
+Both score the same clips with the same metric, so the numbers are comparable to each other.
+`--score both` runs them back to back. The script synthesises its 16-clip corpus with macOS `say`
+and re-encodes it the way WhatsApp ships a voice note (mono Opus in Ogg, 16 kbit/s, 16 kHz), or
+takes `--clips DIR --refs FILE` if you have real recordings — which is the better measurement, and
+the one you can only make with audio you are entitled to send. A good result is Kiswahili and Sheng
+coming down from above 1.0 to somewhere near the English column; anything still above ~0.5 is not
+worth the privacy trade.
 
 ## Setup
 
@@ -250,11 +311,14 @@ read before a first run.
 | `HEADLESS` | `false` shows the browser. A first link needs a WebAuthn step a headless container cannot do, so link on a laptop and move the session folder — see `docs/CONTEXT.md` |
 | `CONTACTS_FILE`, `BRIDGE_API_HOST` | Both default to single-machine behaviour; compose sets them so the two containers share one `contacts.json` and can reach each other |
 | `APP_LOG_FILE` | Where the JSON log goes, rotated at 1MB x 3 (default `data/app.log`). Logs carry no message text, phone numbers or coordinates |
-| `WHISPER_MODEL_SIZE`, `DASHBOARD_WHISPER_SIZE` | Model size for voice notes and for dashboard dictation |
+| `STT_PROVIDER` | `whisper` (local, private, the default) or `gemini` — see [Transcription](#transcription-whisper-or-gemini), including what the free tier means for other people's voice notes |
+| `GEMINI_API_KEY` | Only for `STT_PROVIDER=gemini`. Empty means the local path runs, and says so once |
+| `GEMINI_STT_MODEL`, `GEMINI_STT_ENDPOINT`, `GEMINI_STT_TIMEOUT`, `GEMINI_STT_LANGUAGE_CODES` | Overrides for the remote transcriber; the defaults are the documented ones and auto language detection |
+| `WHISPER_MODEL_SIZE`, `DASHBOARD_WHISPER_SIZE` | Model size for voice notes and for dashboard dictation (`STT_PROVIDER=whisper` only) |
 | `TTS_PROVIDER` | `edge` (free) or `openai` (an instructable, more Kenyan-sounding voice, paid per use) |
 | `OPENAI_API_KEY`, `OPENAI_TTS_VOICE`, `OPENAI_TTS_STYLE`, `OPENAI_TTS_MODEL` | Only for `TTS_PROVIDER=openai`. Claude has no speech endpoint, so this one voice keeps its own key |
 | `DASHBOARD_VOICE_SW`, `DASHBOARD_VOICE_EN` | edge-tts voices (`sw-KE-ZuriNeural`, `en-KE-AsiliaNeural`; male: `sw-KE-RafikiNeural`, `en-KE-ChilembaNeural`) |
-| `STT_LANGUAGE` | Whisper's language hint, `en` by default |
+| `STT_LANGUAGE` | Whisper's language hint, `en` by default. Gemini detects the language itself and ignores it |
 | `TZ` | `Africa/Nairobi`; every schedule answer is worked out in it |
 | `ASSISTANT_NAME` | Arianna's name (also edit the wake-word spellings in `dashboard.html`) |
 | `MESSAGE_RETENTION_DAYS` | How long message history is kept (default 30) |
@@ -300,7 +364,7 @@ Two comparisons worth keeping in mind:
 
 - The pre-port OpenAI baseline (2026-10-04, 3 runs/case) scored 31/32 but let
   **one unsafe message through**. Both Claude runs have let none through.
-- Against the Arabic case set, `schedule` went 2/4 → 0/4. That is the model
+- Against the case set used before the port, `schedule` went 2/4 → 0/4. That is the model
   becoming *more* conservative, not worse: with no Schedule section to read
   from, holding is correct, and the two earlier passes were answers given
   without grounds. A higher score here is only meaningful once the notes are
@@ -319,7 +383,8 @@ app/
   assistant.py       Arianna: tool calling and tool handling
   controls.py        kill switch, contact modes, message and activity feeds
   approvals.py       held-reply approval
-  stt.py, tts.py, vision.py, lang.py   Whisper, voices, photo preparation, language choice
+  stt.py, stt_gemini.py                Transcription: the provider seam, and the Gemini one
+  tts.py, vision.py, lang.py           Voices, photo preparation, language choice
   style_retrieval.py, export_parser.py  tone retrieval from past chats
   contacts.py, log.py                   contacts.json lookup, structured logging
   live.py            notices that a conversation changed, pushed to open dashboards

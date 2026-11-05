@@ -1,4 +1,21 @@
-"""Speech-to-text using faster-whisper. Runs locally, no API key needed."""
+"""Speech-to-text: where a voice note becomes text.
+
+Two implementations behind one entry point, chosen by STT_PROVIDER:
+
+  whisper  faster-whisper, on this machine, free, no key, the default. The
+           audio never leaves the host. Excellent on English (0.01-0.02 word
+           error rate), unusable on Kiswahili and Sheng at every model size --
+           see docs/host-memory.md and scripts/measure_whisper.py.
+  gemini   Google's gemini-3.5-transcribe, in app/stt_gemini.py. Detects the
+           language itself and is documented to handle code-switching inside a
+           sentence, which is the actual shape of this corpus. Needs a key, and
+           on the free tier the audio is other people's voice notes sent to a
+           service whose terms say humans may read them -- app/stt_gemini.py's
+           docstring, .env.example and README.md all say so where it matters.
+
+Anything that is not "gemini" with a key behind it is the local path, which is
+what nothing-in-the-environment gets.
+"""
 from __future__ import annotations
 
 import base64
@@ -40,9 +57,64 @@ _lock = threading.Lock()
 
 # Kenyan WhatsApp voice notes are mostly English or a mix with Kiswahili, and
 # Whisper does noticeably better on English than on Swahili. STT_LANGUAGE
-# overrides it ("sw" to bias the other way).
+# overrides it ("sw" to bias the other way). The remote provider reads this
+# too, but only to spot a deliberate "sw": it detects the language itself, and
+# app/stt_gemini.py's _language_codes says why a hint would hurt it.
 DEFAULT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
 
+WHISPER = "whisper"
+GEMINI = "gemini"
+
+# Which of the two the first voice note of a process found missing, so a
+# misconfiguration is said once instead of on every message. app/tts.py logs
+# its fallback per failure because a TTS failure is an event; this one is a
+# setting, and a setting that is wrong is wrong forever.
+_said_once: set[str] = set()
+
+
+def provider() -> str:
+    """whisper unless something says otherwise, so nothing changes for anyone
+    who sets nothing. Same shape as tts.provider()."""
+    return os.getenv("STT_PROVIDER", WHISPER).strip().lower()
+
+
+def _gemini():
+    """app/stt_gemini.py, imported on the first voice note that needs it.
+
+    Deferred for the reason the TYPE_CHECKING block above gives: importing
+    app.main must not drag in a transcription stack. The module itself only
+    needs the standard library and app.log today -- it is a REST call, not an
+    SDK -- but the import stays inside the function so that stops being true
+    loudly rather than quietly if anyone swaps the call for a Google SDK.
+    tests/test_lazy_models.py holds that property.
+    """
+    from app import stt_gemini
+
+    return stt_gemini
+
+
+def use_gemini() -> bool:
+    """Whether this transcription should go to Google.
+
+    Both halves have to be true: the provider asked for, and a key present.
+    No key is not an error -- it is the local path, running exactly as it did
+    before, which is what makes this change safe to deploy before the key
+    exists. It is still worth one line in the log the first time, because
+    STT_PROVIDER=gemini with no key looks switched on and is not.
+    """
+    if provider() != GEMINI:
+        return False
+    if _gemini().api_key():
+        return True
+    if "no_key" not in _said_once:
+        _said_once.add("no_key")
+        log_event("stt_provider_has_no_key", level="warning", provider=GEMINI,
+                  falling_back_to=WHISPER)
+    return False
+
+
+# Everything below here is the local provider.
+#
 # One voice note loads a model that used to stay resident until the container
 # was restarted, on a host already 88% into swap — 272 MiB of resident growth
 # for "base" and 562 MiB for "small", measured by scripts/measure_whisper.py.
@@ -210,6 +282,21 @@ def _run_transcription(model: WhisperModel, audio: bytes, language: str, vad: bo
 
 
 def transcribe_bytes(audio: bytes, language: str = DEFAULT_LANGUAGE, model_size: str | None = None, vad: bool = False) -> str:
+    """Audio bytes to text, through whichever provider is configured.
+
+    `model_size` and `vad` are Whisper's and are ignored by the remote
+    provider, which has neither a size to pick nor a voice-activity filter to
+    switch on. They stay in the signature because app/dashboard.py passes them
+    positionally, and because turning the provider on must not change what
+    this function means to a caller.
+
+    Raises on failure -- stt_gemini.TranscriptionUnusable for a provider that
+    could not answer, or whatever faster-whisper raises locally. The dashboard
+    already answers that with a 422; transcribe_base64_audio below turns it
+    into a held message.
+    """
+    if use_gemini():
+        return _gemini().transcribe(audio, language=language)
     size, model = _acquire_model(model_size)
     try:
         return _run_transcription(model, audio, language, vad)
@@ -218,4 +305,51 @@ def transcribe_bytes(audio: bytes, language: str = DEFAULT_LANGUAGE, model_size:
 
 
 def transcribe_base64_audio(media_base64: str) -> str:
-    return transcribe_bytes(base64.b64decode(media_base64), language=DEFAULT_LANGUAGE)
+    """The WhatsApp path: base64 in, text out, and an empty string for a voice
+    note that could not be transcribed.
+
+    The empty string is the fail-closed answer, not a shrug. app/llm.py's
+    chat_completion refuses to call the model with nothing to reply to and
+    returns needs_owner, which verify() in app/agent_graph.py turns into a
+    hold -- so an unreadable voice note reaches the owner in the Held tab and
+    never reaches the sender as a guessed reply. That is the same path a voice
+    note Whisper heard silence in has always taken.
+
+    Only the provider's own typed failure is caught. A real bug in here still
+    raises, because swallowing it would mean every voice note quietly becoming
+    a hold with nobody the wiser.
+
+    One thing this cannot do from inside this file: the reason below is written
+    for the owner, but the Held tab shows the `why` that came from the reply
+    model, and the one line that would carry this through -- a hold_reason set
+    in app/agent_graph.py's classify_and_resolve, the way image_problem is --
+    belongs to that file. Until then the reason is in the log.
+    """
+    audio = base64.b64decode(media_base64)
+    if not use_gemini():
+        return transcribe_bytes(audio, language=DEFAULT_LANGUAGE)
+    try:
+        return transcribe_bytes(audio, language=DEFAULT_LANGUAGE)
+    except _gemini().TranscriptionUnusable as err:
+        # No fall back to local Whisper, and this is the decision the rest of
+        # this file leans on, so it is argued here rather than asserted.
+        #
+        # Whisper's failure on this corpus is not a worse transcript, it is a
+        # confident one: docs/host-memory.md has a Swahili clip coming back as
+        # fluent, unrelated English. Nothing downstream can catch that. The
+        # verifier judges whether a *reply* is grounded in the prompt, and a
+        # reply grounded in an invented message passes -- so a fallback would
+        # turn "held, with a reason" into "answered, about something nobody
+        # said", which is the one outcome this whole design exists to prevent.
+        #
+        # It is also what the memory is: keeping Whisper warm as a fallback
+        # means keeping ctranslate2 and the weights installed and resident,
+        # which is most of what switching providers could give back on a host
+        # already deep into swap. Holding is both the safer answer and the
+        # cheaper one, so there is no trade to make here.
+        #
+        # STT_PROVIDER=whisper remains one field in Coolify for anyone who
+        # would rather have a wrong transcript than a wait.
+        log_event("stt_unusable", level="warning", provider=GEMINI,
+                  reason=str(err), kb=len(audio) // 1024)
+        return ""
