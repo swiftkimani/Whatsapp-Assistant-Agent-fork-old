@@ -10,6 +10,8 @@ const fs = require("fs");
 const path = require("path");
 const { checkAllowed } = require("./allowlist");
 const { SendQueue } = require("./send_queue");
+const { BurstBuffer } = require("./burst");
+const { cleanName } = require("./contacts_sync");
 const { readContacts } = require("./bridge_api");
 const { startBridgeApi } = require("./bridge_api");
 
@@ -51,15 +53,16 @@ const ALLOWED_CONTACTS = (process.env.ALLOWED_CONTACTS || "")
 // live in allowlist.js so they can be tested without a WhatsApp connection —
 // this is the boundary that decides whose messages get transcribed, stored and
 // sent to a model, and it had no tests at all. Run them with: npm test
-function allowCheck(msg) {
+function allowCheck(msg, getContact) {
   return checkAllowed(msg.from, {
     allowed: ALLOWED_CONTACTS,
     allowGroups: ALLOW_GROUPS,
     // Read fresh each time, so syncing a new contact takes effect at once.
     addressBook: () => Object.values(readContacts()),
     // Some contacts arrive as an opaque "@lid" privacy id rather than a
-    // number; only then is a lookup worth the round trip.
-    resolveContact: () => msg.getContact(),
+    // number; only then is a lookup worth the round trip. The caller passes
+    // the memoised lookup, so this and push_name share one round trip.
+    resolveContact: getContact,
   });
 }
 
@@ -342,13 +345,18 @@ async function repliesAreFlowing() {
   return agentState.sending;
 }
 
-// WhatsApp clears "typing…" after about 25 s and a reply can take longer, so
-// it is refreshed until the answer is ready. Entirely cosmetic: every failure
-// here is swallowed, because none of it is worth losing a reply over.
-async function showTyping(msg) {
+// WhatsApp clears "typing…" after about 25 s and a burst plus an agent run
+// takes longer, so it is refreshed until the answer is out. Entirely
+// cosmetic: every failure here is swallowed, because none of it is worth
+// losing a reply over.
+//
+// Keyed by chat id rather than by message: it now starts when the FIRST
+// message of a burst arrives and is cleared by the flush path, which is past
+// the point where that one message object means anything.
+async function showTyping(chatId) {
   if (!TYPING_INDICATOR || !(await repliesAreFlowing())) return null;
   try {
-    const chat = await msg.getChat();
+    const chat = await client.getChatById(chatId);
     await chat.sendStateTyping();
     const refresh = setInterval(() => { chat.sendStateTyping().catch(() => {}); }, 20000);
     return () => {
@@ -360,131 +368,188 @@ async function showTyping(msg) {
   }
 }
 
+// People text in bursts. "Very good", then "arie or kim?" eight seconds
+// later, then a photo — and a webhook per message turned that into three
+// concurrent agent runs over the same stored history, each blind to the
+// others, racing to send. One reply went out, the rest were held or dropped by
+// the send ceiling, and the live question was never answered.
+//
+// So messages are collected per chat and answered once. That also cuts what
+// this account sends — one send per burst instead of one per message — and
+// three replies inside one second is exactly what automation looks like from
+// WhatsApp's side, with this account getting flagged the worst outcome in the
+// system. One considered reply after a human-length pause is
+// what a person looks like. The rules are in burst.js, tested without a
+// WhatsApp connection.
+const bursts = new BurstBuffer({
+  // "typing…" from the moment she starts writing, so the wait reads as
+  // somebody composing an answer rather than as nothing happening. The handle
+  // rides along to the flush, which clears it once the answer is out.
+  onOpen: (chatId) => showTyping(chatId),
+  onFlush: (turn) => answerBurst(turn),
+});
+
+/**
+ * The contact behind one message, fetched at most once.
+ *
+ * allowCheck() already resolves the contact for "@lid" privacy ids and
+ * push_name needs the same object, so the two share one round trip into the
+ * page rather than each paying for its own.
+ */
+function contactOnce(msg) {
+  let pending = null;
+  return () => {
+    if (!pending) pending = msg.getContact();
+    return pending;
+  };
+}
+
+/** What to call this person, or "" when WhatsApp will not say. */
+async function displayName(getContact) {
+  try {
+    const contact = await getContact();
+    if (!contact) return "";
+    // The name HE saved comes first — she is "Kawira" to him whatever her
+    // profile says — then what she calls herself, then a business's verified
+    // name. Cleaned by the same function contacts.json uses, so the backend
+    // sees one shape of name from both paths.
+    return cleanName(contact.name || contact.pushname || contact.verifiedName || "");
+  } catch {
+    // A name is a nicety; losing it must not cost the reply.
+    return "";
+  }
+}
+
+/**
+ * One burst, one webhook call, one reply. Everything that talks to the backend
+ * or sends to WhatsApp lives here — past the point where the messages have
+ * stopped arriving, so it runs once per turn rather than once per message.
+ */
+async function answerBurst(turn) {
+  // Started when the first message of this burst landed; cleared below, once
+  // the answer has gone out or has failed to.
+  const stopTyping = await turn.open;
+  try {
+    const payload = {
+      from: turn.chatId,
+      number: turn.number,
+      // Every message of the burst, newline-joined, because that is how the
+      // thread reads on her phone.
+      body: turn.body,
+      type: turn.media ? turn.media.type : "text",
+      media_base64: turn.media ? turn.media.base64 : null,
+      mimetype: turn.media ? turn.media.mimetype : null,
+      // The contact's WhatsApp display name, once for the whole burst.
+      push_name: turn.pushName,
+    };
+    console.log(`[burst] ${anon(turn.chatId)} ${turn.count} message(s) folded into one turn ` +
+                `(${turn.reason}) type=${payload.type}`);
+
+    const { data } = await axios.post(BACKEND_URL, payload, {
+      timeout: 180000,
+      headers: { "x-bridge-token": process.env.BRIDGE_API_TOKEN || "" },
+    });
+
+    if (data.action === "send") {
+      await sendAnswer(turn, data);
+    } else if (data.action === "hold") {
+      console.log(`Held for approval for ${anon(turn.chatId)} — check your dashboard.`);
+    }
+  } finally {
+    if (stopTyping) stopTyping();   // never leave them watching "typing…" forever
+  }
+}
+
+/** Send the backend's answer for one turn, spaced and quoted as it asked. */
+async function sendAnswer(turn, data) {
+  const text = data.reply_text || "";
+  if (!(await paced(text.length, "auto-reply"))) {
+    // Over a ceiling. Saying nothing is the right failure here: the draft is
+    // already in the owner's held queue either way.
+    console.log(`Held back for ${anon(turn.chatId)} — check your dashboard.`);
+    return;
+  }
+  if (data.reply_audio_base64) {
+    const voiceMedia = new MessageMedia("audio/ogg", data.reply_audio_base64);
+    await client.sendMessage(turn.chatId, voiceMedia, { sendAudioAsVoice: true });
+    return;
+  }
+  if (!text) return;
+
+  // She decides per message whether the reply needs to show what it
+  // answers — quoting every one is what makes something read as a
+  // bot. ignoreQuoteErrors is spelled out because the library's
+  // default is true: left off, a quote that cannot be attached is
+  // dropped and the bare text goes out anyway, which in a busy group
+  // is a different message from the one she wrote.
+  //
+  // The LAST message of the burst is the one quoted: it is the one being
+  // answered. Quoting the first is how "arie or kim?" ended up answered by a
+  // reply hanging off "Very good".
+  const quoted = data.quote ? { quotedMessageId: turn.lastId,
+                                ignoreQuoteErrors: false } : {};
+  try {
+    await client.sendMessage(turn.chatId, text, quoted);
+  } catch (err) {
+    // Only the quote can fail here; the text is still worth sending,
+    // and a reply that never arrives is worse than one without its
+    // quote. Retried once, plainly, and said out loud.
+    if (!data.quote) throw err;
+    console.error("Quoting failed, sending without it:", err.message);
+    await client.sendMessage(turn.chatId, text);
+  }
+}
+
 client.on("message", async (msg) => {
   try {
     if (msg.fromMe) {
       console.log(`[BLOCKED - fromMe] ${anon(msg.from)}`);
       return;
     }
-    const { allowed, number, kind, reason } = await allowCheck(msg);
+    const contact = contactOnce(msg);
+    const { allowed, number, kind, reason } = await allowCheck(msg, contact);
     if (!allowed) {
       console.log(`[BLOCKED] ${anon(msg.from)} kind=${kind} reason=${reason} resolved=${anon(number)}`);
       return;
     }
-    console.log(`[ALLOWED] ${anon(msg.from)} type=${msg.type}`);
+    console.log(`[ALLOWED] ${anon(msg.from)} type=${msg.type} hasMedia=${msg.hasMedia}`);
 
     if (ECHO_ONLY) {
       await client.sendMessage(msg.from, `echo: ${msg.body}`);
       return;
     }
-      const payload = {
-        from: msg.from,
-        number,
-        body: msg.body || "",
-        type: "text",
-        media_base64: null,
-        mimetype: null,
-      };  
 
-      console.log(`[DEBUG] ${anon(msg.from)} type=${msg.type} hasMedia=${msg.hasMedia}`);
-
-      const stopTyping = await showTyping(msg);
-
-      if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio" || msg.type === "image")) {
-        try {
-          const media = await msg.downloadMedia();
-          if (!media || !media.data) throw new Error("downloadMedia returned nothing");
-          payload.media_base64 = media.data;
-          payload.mimetype = media.mimetype;
-          payload.type = msg.type === "image" ? "image" : "voice";
-        } catch (err) {
-          console.error("downloadMedia failed:", err.stack || err);
-          if (!payload.body) return; // voice note or image with no text: nothing to answer
-          // image with a caption: fall through and answer the text only
-        }
-      }
-
-      let data;
+    // Downloaded while the message object is in hand; the burst carries the
+    // bytes through to the flush.
+    let media = null;
+    if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio" || msg.type === "image")) {
       try {
-        ({ data } = await axios.post(BACKEND_URL, payload, {
-          timeout: 180000,
-          headers: { "x-bridge-token": process.env.BRIDGE_API_TOKEN || "" },
-        }));
-      } finally {
-        if (stopTyping) stopTyping();   // never leave them watching "typing…" forever
+        const got = await msg.downloadMedia();
+        if (!got || !got.data) throw new Error("downloadMedia returned nothing");
+        media = { base64: got.data, mimetype: got.mimetype,
+                  type: msg.type === "image" ? "image" : "voice" };
+      } catch (err) {
+        console.error("downloadMedia failed:", err.stack || err);
+        if (!msg.body) return; // voice note or image with no text: nothing to answer
+        // image with a caption: fall through and answer the text only
       }
+    }
 
-      if (data.action === "send") {
-        const text = data.reply_text || "";
-        if (!(await paced(text.length, "auto-reply"))) {
-          // Over a ceiling. Saying nothing is the right failure here: the
-          // draft is already in the owner's held queue either way.
-          console.log(`Held back for ${anon(msg.from)} — check your dashboard.`);
-        } else if (data.reply_audio_base64) {
-          const voiceMedia = new MessageMedia("audio/ogg", data.reply_audio_base64);
-          await client.sendMessage(msg.from, voiceMedia, { sendAudioAsVoice: true });
-        } else if (text) {
-          // She decides per message whether the reply needs to show what it
-          // answers — quoting every one is what makes something read as a
-          // bot. ignoreQuoteErrors is spelled out because the library's
-          // default is true: left off, a quote that cannot be attached is
-          // dropped and the bare text goes out anyway, which in a busy group
-          // is a different message from the one she wrote.
-          const quoted = data.quote ? { quotedMessageId: msg.id._serialized,
-                                        ignoreQuoteErrors: false } : {};
-          try {
-            await client.sendMessage(msg.from, text, quoted);
-          } catch (err) {
-            // Only the quote can fail here; the text is still worth sending,
-            // and a reply that never arrives is worse than one without its
-            // quote. Retried once, plainly, and said out loud.
-            if (!data.quote) throw err;
-            console.error("Quoting failed, sending without it:", err.message);
-            await client.sendMessage(msg.from, text);
-          }
-        }
-      } else if (data.action === "hold") {
-        console.log(`Held for approval for ${anon(msg.from)} — check your dashboard.`);
-      }
-    }   catch (err) {
-      console.error("Error handling message:", err.stack || err);
-    } 
+    // From here the buffer decides when this becomes a webhook post and a
+    // reply: on the next quiet gap, or sooner if she floods, or at the
+    // ceiling if she never stops.
+    bursts.add({
+      chatId: msg.from,
+      id: msg.id._serialized,
+      body: msg.body || "",
+      media,
+      number,
+      pushName: await displayName(contact),
+    });
+  } catch (err) {
+    console.error("Error handling message:", err.stack || err);
+  }
 });
-
-//     const payload = {
-//       from: msg.from,
-//       body: msg.body || "",
-//       type: "text",
-//       media_base64: null,
-//       mimetype: null,
-//     };
-
-//     if (msg.hasMedia && (msg.type === "ptt" || msg.type === "audio" || msg.type === "image")) {
-//       const media = await msg.downloadMedia();
-//       payload.media_base64 = media.data;
-//       payload.mimetype = media.mimetype;
-//       payload.type = msg.type === "image" ? "image" : "voice";
-//     }
-
-//     const { data } = await axios.post(BACKEND_URL, payload, { timeout: 60000 });
-
-//     if (data.action === "send") {
-//       if (data.reply_audio_base64) {
-//         const voiceMedia = new MessageMedia("audio/ogg", data.reply_audio_base64);
-//         await client.sendMessage(msg.from, voiceMedia, { sendAudioAsVoice: true });
-//       } else if (data.reply_text) {
-//         await client.sendMessage(msg.from, data.reply_text);
-//       }
-//     } else if (data.action === "hold") {
-//       console.log(`Held for approval: "${data.reply_text}" — check your dashboard.`);
-//     } else {
-//       // "ignore" — not on the allowlist, or a group chat with ALLOW_GROUPS off.
-//       // No reply, no log spam, nothing sent back.
-//     }
-//   } catch (err) {
-//     console.error("Error handling message:", err.message);
-//   }
-// });
 
 // Chromium writes SingletonLock/Cookie/Socket into its profile, tagged with the
 // hostname of the machine that created them. A container redeploy keeps the
