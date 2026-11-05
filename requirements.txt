@@ -6,6 +6,16 @@ pydantic==2.9.2
 # set, and the stdlib has no argon2 — only pbkdf2 and scrypt.
 argon2-cffi==23.1.0
 
+# Web push for the Held queue: P-256 key handling and the ES256 signature on
+# the VAPID token every push service demands. The stdlib has hashing but no
+# elliptic curve arithmetic, and hand-rolling P-256 in a key-handling path is
+# not something to ship. pywebpush is the usual choice and pulls three
+# packages, most of which serve the RFC 8291 payload encryption this design
+# deliberately does not use -- the push carries no payload at all, so nothing
+# about a conversation passes through Google's or Mozilla's servers.
+# Apache-2.0 / BSD-3-Clause, released monthly, only needs cffi (already here).
+cryptography==46.0.3
+
 # LLM
 anthropic==2.3.0
 
