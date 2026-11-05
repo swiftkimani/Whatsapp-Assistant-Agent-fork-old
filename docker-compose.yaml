@@ -65,13 +65,14 @@ services:
       TTS_PROVIDER: ${TTS_PROVIDER:-edge}
       TZ: ${TZ:-Africa/Nairobi}
 
-      # ctranslate2 (faster-whisper) and torch both size their thread pools
-      # from the host's core count, so one voice note recruited every vCPU the
-      # VPS has — and then kept the memory. glibc gives each allocating thread
-      # a 64 MiB arena of its own and never takes one back, which is the
-      # likeliest explanation for the gap between the ~1.9 GiB of models and
-      # libraries this service can actually account for and the 3840 MiB the
-      # host's monitor reported. Two threads is slower per transcription and
+      # ctranslate2 (faster-whisper) sizes its thread pool from the host's
+      # core count, so one voice note recruited every vCPU the VPS has — and
+      # then kept the memory. glibc gives each allocating thread a 64 MiB
+      # arena of its own and never takes one back, which is the likeliest
+      # explanation for the gap between the models and libraries this service
+      # can actually account for and the 3840 MiB the host's monitor reported
+      # (then ~1.9 GiB of it, with BLIP and torch still here; now ~800 MiB —
+      # see the resources block below). Two threads is slower per transcription and
       # much cheaper per container, and on a host already 88% into swap the
       # extra threads were buying latency that swapping took straight back.
       OMP_NUM_THREADS: 2
@@ -90,21 +91,27 @@ services:
     # /api/wa/chats take 3.4 seconds. A limit is a ceiling, not a request: it
     # costs nothing until something tries to pass it.
     #
-    # 2.5 GiB is what this service can justify, not a tidy figure. The
-    # interpreter with torch, transformers and ctranslate2 loaded measures
-    # ~250 MiB, and they are resident from boot rather than on demand, because
-    # app/main.py imports app.agent_graph, which imports app.stt and
-    # app.vision at module level. One faster-whisper "small" at int8 measured
-    # 610 MiB resident once loaded. BLIP captions images in fp32 — app/vision.py
-    # asks for no dtype — so its weights stay the ~1 GB app/download_blip.py
-    # warns about. That is ~1.9 GiB once one voice note and one photo have
-    # arrived, and it never comes back down: both model caches are module-level
-    # globals, held deliberately so the next message does not pay the load
-    # again. The remainder is room for a request's own buffers.
+    # 1.5 GiB is what this service can justify, not a tidy figure, and it is
+    # half what it was: BLIP is gone, and with it torch and transformers.
+    # Photos now go to the model as images and it looks at them itself, so the
+    # only model that still runs in this container is Whisper.
+    #
+    # app/main.py boots at 135 MiB measured (the interpreter, FastAPI, the
+    # Anthropic client and the dashboard; ctranslate2 and Pillow load on
+    # demand, not at import — tests/test_lazy_models.py holds that). One
+    # faster-whisper "small" at int8 measured 610 MiB resident once loaded,
+    # and it stays: the cache is a module-level global, held deliberately so
+    # the next voice note does not pay the load again. A photo is transient
+    # now — Pillow decodes it, scales the long edge to 1568 and frees it
+    # within the request — where it used to add ~1 GB of fp32 weights that
+    # never came back down, plus ~115 MiB just to import torch. So ~800 MiB
+    # accounted for; the rest of the ceiling is allocator retention (which is
+    # what MALLOC_ARENA_MAX above is about) and a request's own buffers.
     #
     # So raising WHISPER_MODEL_SIZE or DASHBOARD_WHISPER_SIZE past "small"
     # means raising this too: "medium" is roughly another 1.2 GiB, and
-    # app/stt.py keeps one loaded model per distinct size.
+    # app/stt.py keeps one loaded model per distinct size — two sizes set to
+    # "medium" would not fit under this at all.
     #
     # cpus 1.5 because the only thing here that wants a core is a
     # transcription, OMP_NUM_THREADS above holds that to two threads, and this
@@ -116,14 +123,15 @@ services:
     #
     # The host is 6 cores and 11.7 GB (Coolify's server page, 2026-11-04), so
     # these ceilings are set to cap the runaway rather than to ration a small
-    # machine: 3 GiB here and 3 GiB for the bridge is 6 of 11.7, which leaves
-    # Coolify itself and the page cache room to breathe. A ceiling under the
-    # real working set does not save memory, it turns a slow service into one
-    # the kernel keeps killing.
+    # machine: 1.5 GiB here and 3 GiB for the bridge is 4.5 of 11.7, which
+    # leaves Coolify itself and the page cache room to breathe. A ceiling
+    # under the real working set does not save memory, it turns a slow service
+    # into one the kernel keeps killing — which is why this is still roughly
+    # twice what is accounted for above, the same margin the 3 GiB had.
     deploy:
       resources:
         limits:
-          memory: 3072m
+          memory: 1536m
           cpus: "1.5"
         reservations:
           memory: 1024m
@@ -223,7 +231,8 @@ services:
 volumes:
   # The SQLite database, held queue, your notes and contacts.json.
   app-data:
-  # BLIP's weights. Without this every deploy re-downloads them.
+  # Whisper's weights, downloaded through HF_HOME on the first voice note.
+  # Without this every deploy re-downloads them.
   model-cache:
   # Live credentials for the linked WhatsApp account. Losing this means
   # scanning the QR again; copying it lets someone else use the account.

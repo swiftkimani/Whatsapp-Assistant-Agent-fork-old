@@ -17,10 +17,11 @@ openai==1.51.0
 langgraph==0.2.38
 langchain-core==0.3.9
 
-# RAG: hybrid dense + sparse retrieval
-# sentence-transformers==3.1.1
-# faiss-cpu==1.8.0.post1
-# rank-bm25==0.2.2
+# Style retrieval needs no package: app/style_retrieval.py ranks stored reply
+# pairs by IDF-weighted word overlap, in the standard library. The dense
+# embedding alternative (sentence-transformers, FAISS) was listed here and
+# never installed, and it would have cost about a gigabyte of resident memory
+# on a host that already swaps.
 
 # Speech-to-text (runs locally, free)
 faster-whisper==1.0.3
@@ -28,9 +29,10 @@ faster-whisper==1.0.3
 # Text-to-speech (free, no API key) — optional feature, off by default
 edge-tts==6.1.12
 
-# Vision (image captioning)
-transformers==4.44.2
-torch==2.4.1
+# Photos. Pillow shrinks an incoming image before it goes to the model; the
+# model reads the picture itself, so there is no local vision model any more.
+# transformers and torch were here for that one feature — a ~1 GB fp32 BLIP
+# captioner, plus ~900 MB of CPU wheels in the image — and went with it.
 pillow==10.4.0
 httpx==0.27.2
 tzdata==2024.2

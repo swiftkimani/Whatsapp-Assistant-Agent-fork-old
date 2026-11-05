@@ -1,6 +1,5 @@
 """Test setup: fake secrets, a throwaway database and log file, and stand-ins for
-the heavy ML modules (Whisper, BLIP, sentence-transformers) so tests run fast
-and need no GPU, models or API keys."""
+Whisper and the style lookup, so tests run fast and need no models or API keys."""
 import os
 import sys
 import tempfile
@@ -25,8 +24,12 @@ def _stub(name: str, **attrs) -> None:
 
 _stub("app.stt", transcribe_bytes=lambda audio, language="ar", model_size=None, vad=False: f"heard {len(audio)} bytes",
       transcribe_base64_audio=lambda b: "heard")
-_stub("app.vision", caption_base64_image=lambda b: "a photo")
 _stub("app.style_retrieval", retrieve_examples=lambda text, k=5: [])
+# app.vision is deliberately NOT stubbed. It holds no model any more — a photo
+# goes to the model as an image and it looks at the picture itself — so all
+# that is left is a base64 decode and a Pillow resize, with Pillow imported
+# inside the one function that needs it. tests/test_image_replies.py drives
+# the real thing, which a stub would hide.
 # app.tts is deliberately NOT stubbed: it imports only the standard library and
 # app.log, because edge_tts (and the optional openai voice) are imported inside
 # the functions that use them. A stub here would have to list every name its

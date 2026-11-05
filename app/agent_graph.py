@@ -7,7 +7,7 @@ from app.log import anon, log_event
 from app.memory import get_history, seed_from_whatsapp
 from app.stt import transcribe_base64_audio
 from app.style_retrieval import retrieve_examples
-from app.vision import caption_base64_image
+from app.vision import ImageUnusable, image_block
 
 
 class AgentState(TypedDict):
@@ -15,7 +15,10 @@ class AgentState(TypedDict):
     message_type: str             # "text" | "voice" | "image"
     raw_text: str                 # original text body, if any
     media_base64: str | None
-    resolved_text: str            # original-script text after STT / image captioning
+    mimetype: str | None          # what the bridge read off the media, if anything
+    image: dict | None            # the photo, as a block the model can look at
+    image_problem: str            # "" | why that photo cannot be sent, for the owner
+    resolved_text: str            # original-script text after STT, or the photo placeholder
     history: list[dict]           # this contact's rolling memory buffer
     reply_text: str
     grounded: bool                # every fact in the reply comes from the prompt
@@ -30,11 +33,25 @@ def classify_and_resolve(state: AgentState) -> AgentState:
     if state["message_type"] == "voice" and state["media_base64"]:
         state["resolved_text"] = transcribe_base64_audio(state["media_base64"])
     elif state["message_type"] == "image" and state["media_base64"]:
-        caption = caption_base64_image(state["media_base64"])
-        text = f"[Image received] (auto description, not their words): {caption}"
+        # Nothing here describes the photo: the model is given the picture and
+        # looks at it itself. resolved_text is bookkeeping — it is this
+        # message's row in the conversation memory, the message log and the
+        # Held tab, none of which can hold an image — so it says a photo
+        # arrived and repeats only what the sender actually typed. A
+        # description invented here would be read back later as their words.
+        # Same convention as seed_from_whatsapp() in app/memory.py.
+        state["resolved_text"] = "[Photo]"
         if state["raw_text"]:
-            text += f" | Their message with it: {state['raw_text']}"
-        state["resolved_text"] = text
+            state["resolved_text"] += f" Their message with it: {state['raw_text']}"
+        try:
+            state["image"] = image_block(state["media_base64"], state["mimetype"])
+        except ImageUnusable as err:
+            # Fail closed, the way _parse_answer and verify() do: the owner
+            # gets the message in the Held tab with the reason, and no reply is
+            # guessed at a photo nobody could look at.
+            state["image_problem"] = str(err)
+            log_event("image_unusable", level="warning",
+                      chat=anon(state["contact_id"]), reason=str(err))
     else:
         state["resolved_text"] = state["raw_text"]
     return state
@@ -52,18 +69,35 @@ def fetch_history(state: AgentState) -> AgentState:
 
 
 def generate_reply(state: AgentState) -> AgentState:
+    if state["image_problem"]:
+        # Held without spending an API call: there is nothing to reply to here
+        # but a photo that could not be sent.
+        state["reply_text"] = ""
+        state["grounded"] = False
+        state["needs_owner"] = True
+        state["why"] = state["image_problem"][:120]
+        state["quote"] = False
+        return state
+
+    # With a photo attached, what the model is asked about is the caption the
+    # sender typed: resolved_text's "[Photo]" is for the owner's records, and
+    # repeating it beside the picture tells the model nothing. The same string
+    # is what the style lookup should match on, which is why it is one name.
+    message = state["raw_text"] if state["image"] else state["resolved_text"]
+
     examples = []
-    if state["message_type"] != "image":  # an image caption is not something anyone typed
+    if message.strip():
         try:
-            examples = retrieve_examples(state["resolved_text"])
+            examples = retrieve_examples(message)
         except Exception as err:  # style is a bonus: never let it block a reply
             log_event("style_retrieval_skipped", level="warning", error=str(err))
 
     result = chat_completion(
-        state["resolved_text"],
+        message,
         state["history"],
         message_type=state["message_type"],
         examples=examples,
+        image=state["image"],
     )
     state["reply_text"] = result["reply"]
     state["grounded"] = result["grounded"]
@@ -111,7 +145,13 @@ def build_graph():
 _compiled_graph = None
 
 
-def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: str | None) -> AgentState:
+def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: str | None,
+              mimetype: str | None = None) -> AgentState:
+    """`mimetype` is the media type the bridge read off the WhatsApp message
+    (IncomingMessage.mimetype in app/main.py). It is optional because the photo
+    is also identified from its own bytes, so a caller that does not pass it
+    still gets an answered photo — it only loses the earlier, cheaper check on
+    a format the API cannot take."""
     global _compiled_graph
     if _compiled_graph is None:
         _compiled_graph = build_graph()
@@ -121,6 +161,9 @@ def run_agent(contact_id: str, message_type: str, raw_text: str, media_base64: s
         "message_type": message_type,
         "raw_text": raw_text,
         "media_base64": media_base64,
+        "mimetype": mimetype,
+        "image": None,
+        "image_problem": "",
         "resolved_text": "",
         "history": [],
         "reply_text": "",

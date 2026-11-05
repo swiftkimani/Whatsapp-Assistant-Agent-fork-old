@@ -21,7 +21,7 @@ def sending(monkeypatch, fresh_db):
     """An agent that always sends, and a bridge that records what it was given."""
     sent = []
 
-    def fake_agent(contact_id, message_type, raw_text, media_base64):
+    def fake_agent(contact_id, message_type, raw_text, media_base64, mimetype=None):
         return {"resolved_text": raw_text, "reply_text": "niko njiani", "action": "send", "hold_reason": ""}
 
     async def fake_post(path, payload, timeout):

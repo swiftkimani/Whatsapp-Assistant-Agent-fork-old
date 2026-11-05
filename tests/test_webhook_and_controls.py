@@ -13,7 +13,7 @@ def msg(**over):
 def agent(monkeypatch, fresh_db):
     state = {"action": "send", "hold_reason": ""}
 
-    def fake(contact_id, message_type, raw_text, media_base64):
+    def fake(contact_id, message_type, raw_text, media_base64, mimetype=None):
         return {"resolved_text": raw_text, "reply_text": "اه ماشي", **state}
 
     monkeypatch.setattr(main, "run_agent", fake)

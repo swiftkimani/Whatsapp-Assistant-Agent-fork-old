@@ -239,6 +239,11 @@ async def webhook(msg: IncomingMessage, x_bridge_token: str = Header(default="")
         message_type=msg.type,
         raw_text=_model_text(msg),
         media_base64=msg.media_base64,
+        # The bridge read the type off the WhatsApp message, so a format the
+        # model will not take is refused before the bytes are decoded. Without
+        # it the type is still read off the bytes; this only makes the
+        # rejection earlier and cheaper.
+        mimetype=msg.mimetype,
     )
 
     add_user_message(msg.from_, result["resolved_text"])

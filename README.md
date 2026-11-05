@@ -28,7 +28,7 @@ An AI assistant that answers my WhatsApp messages in my own voice (Kenyan Englis
 **On WhatsApp**
 - Replies to incoming messages in my writing style (short, casual, feminine forms, no punctuation), matching the sender's language and script.
 - Answers questions about my work and schedule **only from facts I wrote down** (`data/kb/about_me.md`), such as what I do, what projects I take, and where I am at a given time.
-- Understands **voice notes** (faster-whisper) and **photos** (BLIP captions), and reacts like a friend would.
+- Understands **voice notes** (faster-whisper, local) and **photos** (sent to the model itself, which sees the picture), and reacts like a friend would.
 - **Holds** anything uncertain, personal, or a commitment (invitations, "confirm", "pay") for my approval, and shows me why.
 - Optionally retrieves similar past replies from my own chat exports, so the tone stays close to how I really write.
 
@@ -76,7 +76,7 @@ flowchart LR
     C --> G
     subgraph G["Agent graph (LangGraph)"]
         direction LR
-        S["Voice: Whisper<br/>Photo: BLIP"] --> H["Conversation<br/>history"] --> L["LLM + notes +<br/>schedule + style"] --> V["Verify"]
+        S["Voice: Whisper<br/>Photo: to the model"] --> H["Conversation<br/>history"] --> L["LLM + notes +<br/>schedule + style"] --> V["Verify"]
     end
     V -- "grounded and no owner needed" --> B
     V -- "otherwise, or paused" --> Q[("Held queue<br/>SQLite")]
@@ -136,7 +136,9 @@ Listing messages is a database query: **the model never reads message contents a
 | Data | Where it goes |
 |---|---|
 | Incoming message text, my notes, schedule, recent conversation | **Claude API** (to write the reply) |
-| Voice notes, photos, embeddings | Processed **locally** (faster-whisper, BLIP, sentence-transformers) |
+| Voice notes | Transcribed **locally** (faster-whisper); the audio never leaves the machine |
+| Photos | Sent to the Claude API as an image, because a local captioner only ever produced a lossy English sentence about a picture the model can read itself |
+| Style matching | Word overlap over your own past replies, computed locally — no embedding model |
 | Held replies, conversation memory, message history, audit log | **Local SQLite** (`data/assistant.db`). Message history is deleted after `MESSAGE_RETENTION_DAYS` (default 30) |
 | Arianna's spoken replies (text only) | Microsoft's online voice service (edge-tts), or OpenAI if `TTS_PROVIDER=openai` (the only part that talks to OpenAI) |
 | Microphone audio for the wake word | The browser's speech service (Chrome or Edge), **only while "Say Arianna" is on** |
@@ -317,7 +319,7 @@ app/
   assistant.py       Arianna: tool calling and tool handling
   controls.py        kill switch, contact modes, message and activity feeds
   approvals.py       held-reply approval
-  stt.py, tts.py, vision.py, lang.py   Whisper, voices, BLIP, language choice
+  stt.py, tts.py, vision.py, lang.py   Whisper, voices, photo preparation, language choice
   style_retrieval.py, export_parser.py  tone retrieval from past chats
   contacts.py, log.py                   contacts.json lookup, structured logging
   live.py            notices that a conversation changed, pushed to open dashboards
@@ -370,7 +372,7 @@ told never to state a time it can't derive from it, so it declines instead of gu
 - `whatsapp-web.js` is an **unofficial** library and can get a number banned. This is a personal tool; anything commercial
   should use the official WhatsApp Business Cloud API.
 - The model's flags are self-reported. They are measured by the evaluation set, but they are not a guarantee.
-- Photos are described by a captioner, and the model reacts to the caption rather than seeing the photo.
+- Photos are downscaled and sent to the model, which sees the picture. A format it cannot read is held with the reason rather than guessed at.
 - "Send my location" uses the device the dashboard is open on. A laptop's position is an estimate from Wi-Fi or IP and may be far off.
 - The wake word works only in Chrome or Edge, on HTTPS, with the tab open.
 - A single owner and a single password; no accounts, rate limits on assistant calls, or monitoring dashboards.
