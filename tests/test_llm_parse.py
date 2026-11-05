@@ -15,12 +15,14 @@ def test_valid_answer():
 
 def test_the_reason_is_optional_and_bounded():
     """An older or truncated answer without it must still parse, and a model
-    that ignores the 20-word instruction must not fill the Held tab."""
+    that ignores the 12-word instruction must not fill the Held tab. The bound
+    came down from 200 characters: the owner reads this at a glance beside the
+    message, and a long one crowded out the message itself."""
     out = _parse_answer(json.dumps({"reply": "sawa", "grounded": True, "needs_owner": False}))
-    assert out["why"] == "" and out["reply"] == "sawa"
+    assert out["why"] == "" and out["reply"] == "Sawa"
     long = _parse_answer(json.dumps({"reply": "sawa", "grounded": True,
                                      "needs_owner": False, "why": "x" * 500}))
-    assert len(long["why"]) == 200
+    assert len(long["why"]) == 120
 
 
 @pytest.mark.parametrize("raw", ["", "not json", "[]", "null", '{"grounded": true}', '{"reply": null}'])

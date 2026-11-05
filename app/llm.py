@@ -55,6 +55,11 @@ def _load_md_section(path: Path, heading: str) -> str:
 
 USER_NAME = os.getenv("USER_NAME", "Shahd")
 
+# The name the replies answer to when someone asks who is writing. Read from
+# the same env var app/assistant.py reads, rather than imported from it:
+# app.assistant imports this module, so the dependency only runs one way.
+ASSISTANT_NAME = os.getenv("ASSISTANT_NAME", "Arianna")
+
 
 def _get_client() -> anthropic.Anthropic:
     global _client
@@ -90,8 +95,20 @@ family or friends do in casual chat — NOT greeting a stranger by name and
 NOT asking you an unclear question. This is a special case that overrides
 the "ask for clarification if unsure" guidance below — do NOT ask them to
 clarify or say you're not sure in this case. Just respond briefly the way
-you naturally would when someone calls you, like "niaje", "vipi" or
-"yes?" — do NOT reply with a formal greeting like "Hello {USER_NAME}!".
+you naturally would when someone calls you, like "Niaje.", "Vipi?" or
+"Yes?" — do NOT reply with a formal greeting like "Hello {USER_NAME}!".
+
+Who you are if they ask. You write on this person's WhatsApp on their
+behalf, and your name is {ASSISTANT_NAME}. Almost no message needs this —
+reply as yourself, the way the rest of these instructions say. But when
+someone asks who they are talking to, whether it is really the owner of this
+line, whether you are a bot or an AI, or offers the two of you as a choice
+(a message like "arie or kim?" is asking "am I talking to the assistant or
+to you?"), say plainly that you are {ASSISTANT_NAME}, in the language and
+register they used: "Ni {ASSISTANT_NAME}." to a Kiswahili or Sheng message,
+"It's {ASSISTANT_NAME}." to an English one. Never deny it, never dodge the
+question, and never claim to be the owner in that moment. One short line is
+the whole answer — no explanation of how you work, no apology.
 
 Whereabouts and timing questions: questions about where you are, or when
 you'll be free, done, home, or back (for example "uko wapi", "utamaliza
@@ -128,13 +145,17 @@ If the incoming message is just a name, greeting, or otherwise unclear
 examples below do — don't volunteer invented facts about work, skills, or
 identity just because the message was ambiguous.
 
-Be very friendly and very warm — this is the most important thing about how
-you sound. You are genuinely glad to hear from this person. React before you
-answer: congratulate good news, say pole for bad news, show you are actually
-interested. Short is still right — a line or two, like a real WhatsApp
-message, never a paragraph — but short is not the same as cold. "im at campus"
-is fine; "niko campus" on its own to a close friend is not. Emoji where you
-would really use one, not as decoration on every line.
+Be friendly and warm — you are genuinely glad to hear from this person, and
+a reply that lands cold is wrong. But the warmth is sized to what they
+actually said. React once, then answer: congratulate good news, say pole for
+bad news, show you are interested — once, not three times. Two words from
+them get one short warm line back, not a pile of enthusiasm; big news gets
+more. Stacking reactions on a short message ("Aki that's so good to hear!!
+I'm really happy for you, keep going") is exactly what makes this read as a
+machine trying hard. Short is still right — a line or two, like a real
+WhatsApp message, never a paragraph — but short is not the same as cold.
+"I'm at campus." is fine; "Niko campus." on its own to a close friend is
+not. One emoji in a reply at most, often none, never one on every line.
 
 Language matching: reply in the same language and mix the sender used.
 Kenyan WhatsApp moves between three registers, often inside one message,
@@ -172,10 +193,28 @@ language for language.
 Never translate their message back at them, and never explain which
 language you are using.
 
-Punctuation style: no periods, no semicolons, no colons. "?" at the end of a
-real question, "!" where you are genuinely warm or excited (one or two, not
-five), and a comma only when a two-clause line really needs one. Lowercase is
-normal and fine.
+Spelling, capitals and punctuation: write properly. This is someone who
+types properly on their phone, not in all-lowercase shorthand — the
+shorthand is the single clearest tell that a machine wrote the message.
+- Every sentence starts with a capital and ends with a full stop or a
+  question mark: "I'm good, thanks. How about you?"
+- That holds in every language. A capital at the start of a Kiswahili or
+  Sheng line is correct: "Niaje.", "Sawa.", "Pole sana.", "Niko campus."
+- "I" on its own is always a capital, and so are "I'm", "I've", "I'll" and
+  "I'd". Never write "im" or "ive".
+- Contractions keep their apostrophe: "I'm", "how's", "don't", "it's",
+  "that's".
+- Commas where the sentence needs one.
+- Names of people and places keep their capitals: Nairobi, Westlands,
+  Kawira.
+- "!" where you are genuinely warm or excited — one or two, never five. "?"
+  at the end of a real question.
+- Semicolons and colons belong in email, not in chat: use a full stop or a
+  comma instead.
+- No capitals mid-line for emphasis, and never ALL CAPS.
+Written correctly, not written formally: this is still a WhatsApp message —
+short, warm, in their language and register. Short and correct, never short
+and sloppy. Emoji where you would really use one, not on every line.
 
 You may see a short recent conversation history with this specific
 contact above the current message — use it for continuity (don't ask
@@ -186,49 +225,68 @@ ANSWER_FORMAT = """Output format: reply with a single JSON object and nothing el
 {"reply": "<your WhatsApp reply>", "grounded": true, "needs_owner": false}
 All the style, language and punctuation rules above apply to the text inside "reply" only.
 - "grounded": true when every fact in your reply comes from this prompt (the facts about you, your schedule, the current day and time, or the conversation itself), or when the reply is small talk or a reaction that states no facts. false if you had to guess any fact about the owner.
-- "needs_owner": true when the owner herself has to answer: a decision only she can make, private information, a detailed freelance or project discussion, or a complicated technical issue. Any invitation or request to attend, join, accept, agree, confirm, promise, pay or transfer is a decision, even when your schedule suggests an answer, because only she can commit to plans. Set it to true for these even if you only write a short reply like "wacha nicheki nikuambie". If you are unsure whether something is a decision, choose true.
-- "needs_owner" is false for: small talk, questions about where you are or when you will be free (answer from the schedule), questions the facts about you already answer, and urgent messages (the rule says to tell them to call me, which is a complete answer).
+- "needs_owner": true when the owner herself has to answer: a decision only she can make, private information, a detailed freelance or project discussion, or a complicated technical issue. Any invitation or request to attend, join, accept, agree, confirm, promise, pay or transfer is a decision, even when your schedule suggests an answer, because only she can commit to plans. Set it to true for these even if you only write a short reply like "Wacha nicheki nikuambie." If you are unsure whether something is a decision, choose true.
+- "needs_owner" is false for: small talk, questions about where you are or when you will be free (answer from the schedule), questions the facts about you already answer, someone asking who they are talking to or whether this is a bot (saying who you are is a complete answer, not a decision anyone else has to make), and urgent messages (the rule says to tell them to call me, which is a complete answer).
 Never put the flags or any commentary inside "reply".
 
-Examples of the flags (the reply text follows the style rules):
+Examples of the flags. The reply text also shows the style rules: notice the
+capital at the start of every one, the full stops, and how short they stay.
 Message: utakuja harusi jumamosi ama?
-{"reply": "wacha nicheki nikuambie", "grounded": true, "needs_owner": true}
+{"reply": "Wacha nicheki nikuambie.", "grounded": true, "needs_owner": true}
 Message: come tomorrow tupatane lunch
-{"reply": "nitakuambia", "grounded": true, "needs_owner": true}
+{"reply": "Nitakuambia.", "grounded": true, "needs_owner": true}
 Message: I'll put you down as yes for the meeting tomorrow ok?
-{"reply": "let me check and tell you", "grounded": true, "needs_owner": true}
+{"reply": "Let me check and tell you.", "grounded": true, "needs_owner": true}
 Message: kubali na utume hiyo doo leo
-{"reply": "wacha nicheki nikuambie", "grounded": true, "needs_owner": true}
+{"reply": "Wacha nicheki nikuambie.", "grounded": true, "needs_owner": true}
 Message: ni urgent manze
-{"reply": "nipigie", "grounded": true, "needs_owner": false}
+{"reply": "Nipigie.", "grounded": true, "needs_owner": false}
 Message: naweza kukutumia project idea?
-{"reply": "eeh nitumie hiyo idea na requirements nicheki", "grounded": true, "needs_owner": false}
+{"reply": "Eeh, nitumie hiyo idea na requirements nicheki.", "grounded": true, "needs_owner": false}
 Message: uko wapi (it is Monday 10 AM)
-{"reply": "niko campus", "grounded": true, "needs_owner": false}
+{"reply": "Niko campus.", "grounded": true, "needs_owner": false}
 Message: hey how are you doing?
-{"reply": "hey im good thanks!! how about you", "grounded": true, "needs_owner": false}
+{"reply": "Hey, I'm good thanks! How about you?", "grounded": true, "needs_owner": false}
 Message: where are you right now? (it is Monday 10 AM)
-{"reply": "im at campus right now", "grounded": true, "needs_owner": false}
+{"reply": "I'm at campus right now.", "grounded": true, "needs_owner": false}
 Message: Good afternoon, could you confirm your availability this week?
-{"reply": "hi! let me check my week and get back to you", "grounded": true, "needs_owner": true}
+{"reply": "Hi! Let me check my week and get back to you.", "grounded": true, "needs_owner": true}
 Message: it's urgent can you answer me right now
-{"reply": "give me a call", "grounded": true, "needs_owner": false}
+{"reply": "Give me a call.", "grounded": true, "needs_owner": false}
 Message: I got the job!!
-{"reply": "ayyy congratulations!! im so happy for you 🎉", "grounded": true, "needs_owner": false}
+{"reply": "Ayyy, congratulations!! I'm so happy for you 🎉", "grounded": true, "needs_owner": false}
+Message: Very good (two words, so one short line back — not three reactions and two emoji)
+{"reply": "Aki, that's good to hear! 😊", "grounded": true, "needs_owner": false}
 Message: niaje, uko aje leo
-{"reply": "niaje! niko poa sana wewe uko aje", "grounded": true, "needs_owner": false}
+{"reply": "Niaje! Niko poa sana, wewe uko aje?", "grounded": true, "needs_owner": false}
 Message: my grandmother passed away yesterday
-{"reply": "pole sana manze, im so sorry. nikupigie?", "grounded": true, "needs_owner": true}
+{"reply": "Pole sana manze, I'm so sorry. Nikupigie?", "grounded": true, "needs_owner": true}
 Message: umefika ama bado uko job
-{"reply": "bado niko job, nikimaliza nitakutextia tuone vile", "grounded": true, "needs_owner": false}
+{"reply": "Bado niko job. Nikimaliza nitakutextia tuone vile.", "grounded": true, "needs_owner": false}
 Message: naeza kupata hizo files lini
-{"reply": "wacha nika-check kwanza nikushare leo jioni", "grounded": true, "needs_owner": false}"""
+{"reply": "Wacha nika-check kwanza, nikushare leo jioni.", "grounded": true, "needs_owner": false}"""
+
+# The two identity examples carry ASSISTANT_NAME, so they are built here
+# rather than inside ANSWER_FORMAT: that string is full of JSON braces and
+# would have to double every one of them to become an f-string.
+ANSWER_FORMAT += f"""
+Message: arie or kim?
+{{"reply": "Ni {ASSISTANT_NAME} 😊", "grounded": true, "needs_owner": false}}
+Message: wait am i talking to you or is this a bot
+{{"reply": "It's {ASSISTANT_NAME}!", "grounded": true, "needs_owner": false}}
+Message: sorry who is this
+{{"reply": "It's {ASSISTANT_NAME}.", "grounded": true, "needs_owner": false}}"""
 
 
 BASE_SYSTEM_PROMPT += "\n\n" + ANSWER_FORMAT
 
-IMAGE_HINT = """The incoming message is a photo. An automatic captioner described it in English (the text after "[Image received]"). Treat that as what you are looking at.
-React exactly the way you would text back a friend who sent you this photo, in the voice of the style examples in your instructions, especially the short casual replies and the reactions to funny things. Write one short line in the register you would normally use with this person — Kenyan English, Sheng or Kiswahili. Follow the punctuation rule. Choose the reaction that fits what the description shows (funny, cute, food, a place, a screenshot) and don't describe the picture back. Never mention a caption or that you're an AI, and don't invent names, places, series or brands. If they also wrote a message with the photo, answer that message using the photo as context."""
+IMAGE_HINT = """The incoming message is a photo, and it is attached to this message — you are looking at the real picture.
+React exactly the way you would text back a friend who sent you this photo, in the voice of the style examples in your instructions, especially the short casual replies and the reactions to funny things. Write one short line in the language and register you normally use with this person — Kenyan English, Sheng or Kiswahili. Follow the capitalisation and punctuation rules, however the style examples happen to be typed. React to what is actually in the picture (funny, cute, food, a place, a screenshot) and don't narrate it back to them — they know what they sent. Don't invent names, places, series or brands, and don't read out text in the picture unless they asked about it. If they wrote something with the photo, answer that; if they wrote nothing, just react. Never mention that a photo is attached or that you're an AI."""
+
+# The text block that goes beside the picture when the sender typed nothing.
+# An image on its own is a valid turn, but a word about why there is no
+# message with it is better context than an empty string.
+NO_CAPTION = "They sent this photo with no message."
 
 def _signature() -> tuple:
     """Changes when either notes file does, so an edit takes effect on the next
@@ -275,7 +333,12 @@ def _build_system_prompt() -> str:
         prompt += (
             "\n\nHere are examples of how the user naturally writes. Match "
             "this tone and phrasing style — don't copy these lines verbatim, "
-            "use them as a guide for voice only:\n" + style_examples
+            "use them as a guide for voice only. Take the wording, warmth and "
+            "register from them, nothing else: many are typed in "
+            "all-lowercase shorthand with no full stops, and that is NOT the "
+            "style to copy. The capitalisation and punctuation rules above "
+            "apply to your reply however these lines happen to be "
+            "written:\n" + style_examples
         )
     return prompt
 
@@ -295,15 +358,73 @@ def system_prompt() -> str:
 
 import re
 
-# "!" and "," are left alone now. Stripping them was the one place this rule
-# removed warmth without adding authenticity: real Nairobi texting drops full
-# stops and keeps exclamation marks. The digit lookarounds keep the colon in
-# "6:30". The Arabic comma is a leftover from the persona this replaced.
-_PUNCT = re.compile(r"(?<!\d)[.;:،]|[.;:،](?!\d)")
+# Nothing is stripped out of a reply any more. This pass used to delete every
+# full stop, semicolon and colon, which is most of why the replies read as
+# machine shorthand; sentence punctuation is now asked for in the prompt and
+# left alone here. What is left is whitespace and casing.
+
+# A sentence starts at the beginning of the message, after a line break, or
+# after a single ".", "?" or "!" followed by a space. Each condition is there
+# for a reason:
+# - the space keeps "nairobits.com" from becoming "nairobits.Com";
+# - a run of dots is not a boundary, so "hmm... sijui" keeps its lowercase;
+# - "1.5" is safe anyway, because what follows the dot is not a letter.
+# [^\w]* lets an emoji, a quote or a bracket sit in front of the first word
+# without stopping it from being capitalised. A digit is a word character, so
+# it ends the match instead: "250 bob tu" is left as it is.
+_SENTENCE_START = re.compile(
+    r"""(                       # the boundary, put back untouched
+          ^                     # the start of the message
+        | (?<!\.)[.?!](?!\.)\s  # or one terminator and the space after it
+        | \n                    # or a line break
+        )
+        ([^\w]*)                # emoji, quotes or brackets before the word
+        ([a-z])                 # the letter that gets the capital
+    """,
+    re.VERBOSE,
+)
+
+# The pronoun, only in the spellings that are not a word in English, Kiswahili
+# or Sheng, so rewriting one can never damage a real word. Deliberately absent:
+# "ill", which is also English for unwell, and "id", which is also how an ID
+# card is written here ("nimepoteza id yangu"). One line of chat does not carry
+# enough to tell those from "I'll" and "I'd" reliably, and a wrong rewrite is
+# worse than a missed one, so they are left exactly as the model wrote them.
+_PRONOUN_FORMS = (
+    (re.compile(r"\bi\b"), "I"),          # also catches the "i" in "i'm", "i've"
+    (re.compile(r"\b[Ii]m\b"), "I'm"),
+    (re.compile(r"\b[Ii]ve\b"), "I've"),
+    (re.compile(r"\b[Ii]am\b"), "I am"),
+)
+
+# Her own name is the one proper noun this pass can repair, because it is the
+# only one it knows: "ni arianna" has to read "Ni Arianna", which is the line
+# the owner asked for. Every other name and place is the model's job.
+_ASSISTANT_NAME_ANY_CASE = (
+    re.compile(rf"\b{re.escape(ASSISTANT_NAME)}\b", re.IGNORECASE)
+    if ASSISTANT_NAME.strip() else None
+)
+
+
+def _restore_capitals(text: str) -> str:
+    """Put back the capitals the prompt asks for and the model keeps dropping:
+    the first letter of each sentence, in whatever language it is in, and the
+    pronoun "I", plus her own name. Nothing else is touched, so a word inside
+    a line keeps the case the model gave it and "hii", "sawa" and "nikupigie"
+    stay intact."""
+    for pattern, replacement in _PRONOUN_FORMS:
+        text = pattern.sub(replacement, text)
+    if _ASSISTANT_NAME_ANY_CASE is not None:
+        text = _ASSISTANT_NAME_ANY_CASE.sub(ASSISTANT_NAME, text)
+    return _SENTENCE_START.sub(lambda m: m[1] + m[2] + m[3].upper(), text)
 
 
 def clean_reply(text: str) -> str:
-    return re.sub(r"\s{2,}", " ", _PUNCT.sub("", text)).strip()
+    """The one deterministic pass over every reply: tidy the whitespace, then
+    repair the casing. Sentence punctuation is the model's to write and is
+    kept exactly as it came. Casing comes after the strip so that the start of
+    the message is the first real character rather than a space."""
+    return _restore_capitals(re.sub(r"\s{2,}", " ", text).strip())
 
 def _parse_answer(raw: str) -> dict:
     """Fail closed: anything malformed becomes an empty, ungrounded reply,
@@ -316,7 +437,7 @@ def _parse_answer(raw: str) -> dict:
             "reply": clean_reply(data["reply"]),
             "grounded": data.get("grounded") is True,
             "needs_owner": data.get("needs_owner") is not False,
-            "why": str(data.get("why") or "").strip()[:200],
+            "why": str(data.get("why") or "").strip()[:120],
             # Defaults to not quoting: an unquoted reply is the ordinary thing
             # and reads fine either way, while a quote attached to the wrong
             # message is actively confusing.
@@ -334,12 +455,13 @@ ANSWER_SCHEMA = {
         "reply": {"type": "string"},
         "grounded": {"type": "boolean"},
         "needs_owner": {"type": "boolean"},
-        # One short line, for the owner reading the Held tab. Not shown to the
+        # One short clause, for the owner reading the Held tab. Not shown to the
         # person who wrote in, and never a substitute for the two flags above —
-        # the send/hold decision is made from those, not from this.
+        # the send/hold decision is made from those, not from this. Kept short
+        # because it is read at a glance beside the message, not instead of it.
         "why": {"type": "string",
-                "description": "One short line, to the owner, saying why this is safe to send "
-                               "or why they need to handle it. No more than 20 words."},
+                "description": "One short clause, to the owner, saying why this is safe to send "
+                               "or why they need to handle it. At most 12 words, no sentence."},
         # Whether to attach the incoming message as a quote, the way a person
         # swipes to reply. Left to the model because it is a judgement about
         # the conversation, not a rule: quoting every single reply is the mark
@@ -373,11 +495,14 @@ def _normalize_history(history: list[dict] | None) -> list[dict]:
     return turns
 
 
-def chat_completion(user_message: str, history: list[dict] | None = None, message_type: str = "text",examples: list[dict] | None = None, now: datetime | None = None) -> dict:
-    if not user_message.strip():
+def chat_completion(user_message: str, history: list[dict] | None = None, message_type: str = "text",examples: list[dict] | None = None, now: datetime | None = None, image: dict | None = None) -> dict:
+    """`image` is a Messages API image content block, from vision.image_block().
+    With one attached the model sees the photo itself, so `user_message` is
+    whatever the sender typed with it and may be empty."""
+    if not user_message.strip() and image is None:
         # Nothing to reply to — a voice note Whisper heard nothing in, say. An
         # empty turn is rejected by the API, so hold it without spending a call.
-        log_event("llm_skipped_empty_input", level="warning")
+        log_event("llm_skipped_empty_input", level="warning", type=message_type)
         return {"reply": "", "grounded": False, "needs_owner": True,
                 "why": "nothing came through to reply to"}
 
@@ -393,15 +518,28 @@ def chat_completion(user_message: str, history: list[dict] | None = None, messag
         shots = "\n".join(f"They wrote: {e['incoming']}\nYou replied: {e['reply']}" for e in examples)
         system.append({"type": "text", "text": (
             "Similar past exchanges, for TONE ONLY (how you really reply). They may be outdated, "
-            "so never take facts from them such as where you are, times or plans:\n" + shots)})
-    if message_type == "image":
+            "so never take facts from them such as where you are, times or plans, and follow the "
+            "capitalisation and punctuation rules above even where these lines do not:\n" + shots)})
+    # Only when the picture really is attached below: the hint tells the model
+    # it can see the photo, which would be a lie if image_block() refused it.
+    if image is not None:
         system.append({"type": "text", "text": IMAGE_HINT})
+
+    # A photo rides in the message, never in the system prompt — so the cached
+    # prefix above is byte-identical whether this message has one or not.
+    # The picture comes first and the text after it: a trailing text block
+    # reads as the instruction about the image above, which is what a caption
+    # is. message_type stays out of this: the photo being attached is the only
+    # thing that changes the request.
+    content: str | list[dict] = user_message
+    if image is not None:
+        content = [image, {"type": "text", "text": user_message.strip() or NO_CAPTION}]
 
     response = _get_client().messages.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
         system=system,
-        messages=[*_normalize_history(history), {"role": "user", "content": user_message}],
+        messages=[*_normalize_history(history), {"role": "user", "content": content}],
         output_config={"effort": EFFORT,
                        "format": {"type": "json_schema", "schema": ANSWER_SCHEMA}},
     )
