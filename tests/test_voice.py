@@ -46,11 +46,15 @@ def test_a_reply_starting_with_an_emoji_still_capitalises_its_first_word():
     assert clean_reply("😊 niaje bro") == "😊 Niaje bro"
 
 
-def test_arabic_text_passes_through_unchanged():
-    """The persona this replaced wrote Arabic, and the fixture is still in the
-    suite. Nothing in the casing repair may touch a non-Latin script."""
-    assert clean_reply(" اه ماشي ") == "اه ماشي"
-    assert clean_reply("تمام، نتكلم بعدين") == "تمام، نتكلم بعدين"
+def test_text_with_no_latin_letter_to_repair_comes_back_as_it_went_in():
+    """The repair only ever replaces an ASCII lowercase letter, so text that
+    carries none of them survives it whole: a reply that is nothing but emoji,
+    and a Kiswahili line already written the way the owner would write it.
+    Non-Latin characters are not the casing pass's business and it may not
+    insert, drop or re-case one."""
+    assert clean_reply(" 👍👍 ") == "👍👍"
+    assert clean_reply("Sawa, nitakuambia baadaye") == "Sawa, nitakuambia baadaye"
+    assert clean_reply("Ng'ombe wa shamba amepotea. Nitakupigia") == "Ng'ombe wa shamba amepotea. Nitakupigia"
 
 
 def test_a_sentence_after_a_question_mark_starts_with_a_capital():

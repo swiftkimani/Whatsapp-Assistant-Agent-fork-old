@@ -19,8 +19,8 @@ import re
 import sys
 
 # Matches both common export formats:
-#   Android: "9/15/26, 10:03 PM - Shahd: message text"
-#   iOS:     "[9/15/26, 10:03:12 PM] Shahd: message text"
+#   Android: "9/15/26, 10:03 PM - You: message text"
+#   iOS:     "[9/15/26, 10:03:12 PM] You: message text"
 LINE_START = re.compile(
     r"^(?:\[)?\d{1,2}/\d{1,2}/\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]?M?\]?\s*[-–]?\s*"
     r"(?P<sender>[^:]+):\s*(?P<message>.*)$"

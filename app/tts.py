@@ -34,7 +34,7 @@ def pick_voice(text: str) -> str:
 
 def clean_for_speech(text: str) -> str:
     """Drop emoji and markdown symbols the voice would read out, and cap the length."""
-    text = _EMOJI.sub(" ", text).replace("\u0640", "")   # tatweel (ـ) is only for looks
+    text = _EMOJI.sub(" ", text)
     text = re.sub(r"[*_`#>~|]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > MAX_SPEECH_CHARS:

@@ -28,6 +28,38 @@ assistant and saying "the ai is still not smart".
 | Told when a draft waits | 🟡 | built and wired; the WhatsApp route works as is, web push needs VAPID keys set |
 
 ## Done
+- **2026-11-05 — Arabic removed.** The persona this was built on went on
+  2026-10-30, but its language was still scattered through the code, the
+  tests and the evals, and the owner asked for it gone. Code: the tatweel
+  strip in `app/tts.py`, the Arabic-Indic digit range in
+  `app/export_parser.py` (the `0-9` half stays — replies carrying digits are
+  still dropped as stale facts), and an unused `PUNCTUATION` regex in
+  `evals/run_eval.py` that held the Arabic comma and a comment about a rule
+  `clean_reply` stopped applying. `app/llm.py` had nothing Arabic left, only
+  the old persona named in a comment about why a blank `USER_NAME` is
+  handled there; the reason stayed, the name went. The eval set was already
+  all Kiswahili and Sheng.
+  - Every Arabic test sample is now Kiswahili or Sheng, in the register the
+    system actually receives. Two tests kept their property and changed
+    their evidence: the held card is still proved to cut by characters and
+    not bytes, now with an emoji sentence whose first 160 bytes are not
+    valid UTF-8; and `clean_reply` is still proved to leave text it has no
+    ASCII letter to repair in, now with emoji and already-correct Kiswahili.
+  - `tests/test_message_search.py` had three Arabic cases documenting real
+    FTS5 limits. Two are re-demonstrated in Kiswahili and are better
+    examples than the Arabic ones: "mtoto" does not find "watoto" and the
+    stem "toto" finds neither, because number is marked on the prefix; and
+    the apostrophe in "ng'ombe" is a separator, so "ngombe" does not find
+    it. The third — `remove_diacritics 2` folds Latin accents only, so
+    combining marks elsewhere stay part of the word — has nothing in this
+    corpus to show it with, so it is stated in `search_messages()`'s
+    docstring without an example instead of being dropped.
+  - One test was removed rather than re-sampled: `test_tatweel_is_removed`,
+    which covered the tatweel strip that is now gone. Emoji and markdown
+    removal, the rest of what `clean_for_speech` does, is still covered.
+  - The `## Done — localisation (2026-10-30)` entry below is left exactly as
+    it was. It is the record of this port, and rewriting what the old code
+    did would make the history wrong.
 - **2026-11-05 (second pass) — the five things that were missing.**
   - **Nothing told him a draft was waiting.** There was no notification code
     in the project at all. Two routes now, both off until switched on, both
@@ -45,8 +77,8 @@ assistant and saying "the ai is still not smart".
     correction on first press.
   - **Message search**, on FTS5 as an external-content index (no second copy
     of anyone's words). A POST, because uvicorn logs query strings and a GET
-    would file what he searched for in the container log. Arabic matches
-    whole words only, there is no substring match, emoji are not searchable
+    would file what he searched for in the container log. It matches whole
+    words only, there is no substring match, emoji are not searchable
     — measured and pinned by tests, not hoped about.
   - **A quality report**: sent untouched vs edited vs dismissed, with a
     trend, refusing a percentage below twenty decisions because at four one
@@ -794,7 +826,7 @@ per-contact modes — has to be set again per deployment.
 - The eval set's five misses are all needless holds in the `schedule` and
   `knowledge` categories — "where are you now", "what do you do for work" —
   i.e. questions whose answers belong in the empty `about_me.md`. The replies
-  were deflections ("مش متأكدة لسه هشوف واقولك"), not inventions, so this is
+  were deflections rather than inventions, so this is
   the intended fail-closed behaviour and not a regression from the port. The
   pre-port baseline (2026-10-04, 3 runs/case) scored 31/32 with **one unsafe
   send**; this run had none. Re-run after filling the notes.

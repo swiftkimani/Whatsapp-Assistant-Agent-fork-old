@@ -10,14 +10,6 @@ import time
 
 import pytest
 
-# Arabic, as escapes rather than literals: the harakat cases differ by marks
-# that are invisible in a source file, and two of these tests are entirely
-# about that difference.
-INVOICE = "الفاتورة"          # al-fatura, "the invoice"
-INVOICE_NO_ARTICLE = "فاتورة"           # fatura, without the article
-HELLO_MARKED = "مَرحبًا"           # marhaban, with harakat
-HELLO_PLAIN = "مرحبا"                        # marhaban, without them
-
 TECHNOLOGIST = "\U0001F469\U0001F3FD\u200D\U0001F4BB"   # woman technologist, medium skin tone
 LAPTOP = "\U0001F4BB"
 SKIN_TONE = "\U0001F3FD"
@@ -29,7 +21,7 @@ CONVERSATION = [
     ("254711000001@c.us", "Landlord", "in", "Habari, the water bill for October is 2,400", "replied"),
     ("254711000001@c.us", "Landlord", "out", "Sawa, nitatuma pesa ya maji kesho asubuhi", "auto"),
     ("254711000002@c.us", "Kevo", "in", "Niaje bro, uko aje? Tuonane kesho", "replied"),
-    ("254711000003@c.us", "Mom", "in", f"هتيجي؟ {INVOICE} لازم", "held"),
+    ("254711000003@c.us", "Mom", "in", "Utakuja harusi jumamosi? Lazima nijue leo", "held"),
     ("254711000004@c.us", "Dee", "in", "deposit is 100% refundable, see water_bill.pdf", "replied"),
     ("254711000005@c.us", "Zu", "in", 'she said "pay it today" and left', "replied"),
     ("254711000006@c.us", "Ciru", "in", "the café on Ngong Road", "replied"),
@@ -90,34 +82,36 @@ def test_part_of_a_word_that_is_not_its_start_is_not_found(logged):
     assert found(logged, "abari") == []
 
 
+def test_a_word_that_differs_at_the_front_is_a_different_word(logged):
+    """Kiswahili marks number on the prefix, so a word index cuts across it:
+    "mtoto" and "watoto" never find each other, and the stem they share finds
+    neither. Typing a prefix is the way in, and it has to be the word's own
+    prefix. Measured, and the limitation most likely to bite this corpus."""
+    logged.log_message("254711000012@c.us", "Shiko", "in", "watoto wamerudi shule", "replied")
+    assert found(logged, "watoto") == ["Shiko"]
+    assert found(logged, "mtoto") == []
+    assert found(logged, "toto") == []
+    assert found(logged, "wato") == ["Shiko"]
+
+
+def test_the_apostrophe_in_a_kiswahili_word_splits_it_in_two(logged):
+    """unicode61 counts an apostrophe as one of the spaces between words, so
+    "ng'ombe" is indexed as "ng" and "ombe" and the spelling without it is a
+    different word. Pinned because an empty result for "ngombe" is the
+    behaviour and not a bug to go looking for."""
+    logged.log_message("254711000013@c.us", "Shiko", "in", "ng'ombe wa shamba amepotea", "replied")
+    assert found(logged, "ng'ombe") == ["Shiko"]
+    assert found(logged, "ngombe") == []
+    assert found(logged, "ombe") == ["Shiko"]   # the tail is a word of its own here
+
+
 def test_several_words_are_searched_as_a_phrase(logged):
     """Side by side, in that order — not merely both present somewhere."""
     assert found(logged, "water bill") == ["Dee", "Landlord"]
     assert found(logged, "bill water") == []
 
 
-# ------------------------------------------------- non-Latin scripts ----
-
-def test_an_arabic_word_is_found_whole(logged):
-    assert found(logged, INVOICE) == ["Mom"]
-
-
-def test_an_arabic_word_is_not_found_by_its_tail(logged):
-    """The real behaviour, not the wished-for one: the attached article makes
-    a different word, so searching for the noun alone finds nothing. Typing a
-    prefix is the way in."""
-    assert found(logged, INVOICE_NO_ARTICLE) == []
-    assert found(logged, INVOICE[:5]) == ["Mom"]
-
-
-def test_arabic_harakat_count_as_part_of_the_word(logged):
-    """remove_diacritics folds Latin accents and leaves these alone, so the
-    marked and unmarked spellings are two different words. Measured, and a
-    real limitation of searching this corpus."""
-    logged.log_message("254711000007@c.us", "Rana", "in", f"{HELLO_MARKED} habari", "replied")
-    assert found(logged, HELLO_MARKED) == ["Rana"]
-    assert found(logged, HELLO_PLAIN) == []
-
+# -------------------------------------------- emoji and multi-byte ----
 
 def test_an_emoji_on_its_own_cannot_be_searched_for(logged):
     """Most emoji are the spaces between words as far as the index is

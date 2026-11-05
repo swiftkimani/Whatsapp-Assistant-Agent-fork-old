@@ -300,11 +300,15 @@ def test_a_short_message_is_left_exactly_as_it_is(signed_in, fresh_db):
     assert cards(signed_in)[0]["incoming_short"] == "uko wapi?"
 
 
-def test_an_arabic_message_is_cut_by_characters_not_bytes(signed_in, fresh_db):
-    """Kiswahili, Sheng and Arabic all come through this queue. Cutting bytes
-    would halve a character and leave the card showing a replacement glyph."""
-    sentence = "هتيجي امتى يا حبيبي ده احنا مستنيين من الصبح " * 8
-    held(fresh_db, MOM, sentence, "قريب", 100)
+def test_a_message_with_emoji_in_it_is_cut_by_characters_not_bytes(signed_in, fresh_db):
+    """Kiswahili, Sheng and emoji all come through this queue, and an emoji is
+    four bytes. Cutting bytes would halve one and leave the card showing a
+    replacement glyph: the first 160 bytes of this message are not even valid
+    UTF-8, which is what the byte slice below says out loud."""
+    sentence = "Niaje 😂 boss 🙏 uko aje 😂 leo 🙏 " * 7
+    with pytest.raises(UnicodeDecodeError):
+        sentence.encode()[:160].decode("utf-8")
+    held(fresh_db, MOM, sentence, "sawa", 100)
 
     short = cards(signed_in)[0]["incoming_short"]
     assert len(short) <= 161 and short.endswith("…")

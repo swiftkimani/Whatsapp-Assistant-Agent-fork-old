@@ -31,8 +31,8 @@ from app.log import log_event
 # suite stubs it for the whole run.
 PAIRS_FILE = Path(__file__).resolve().parent.parent / "data" / "style_pairs.json"
 
-# \w on a str pattern is Unicode by default, so this keeps Arabic and accented
-# words whole while dropping punctuation and emoji.
+# \w on a str pattern is Unicode by default, so this keeps accented and
+# non-Latin words whole while dropping punctuation and emoji.
 _WORD = re.compile(r"\w+")
 
 _signature: tuple | None = None

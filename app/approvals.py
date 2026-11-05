@@ -37,7 +37,7 @@ def _digits(value: str) -> str:
 def _shorten(text: str, limit: int) -> str:
     """`text` cut to about `limit` characters on a word boundary, with an ellipsis.
 
-    Python indexes a str by code point, so Kiswahili, Sheng and Arabic come
+    Python indexes a str by code point, so Kiswahili, Sheng and an emoji come
     through the cut whole; slicing the bytes would halve a character and leave
     the card showing a replacement glyph. Text with no whitespace in the first
     half of the budget — a long URL, a script that does not space its words —

@@ -7,9 +7,9 @@ from app.llm import _parse_answer
 
 
 def test_valid_answer():
-    out = _parse_answer(json.dumps({"reply": " اه ماشي ", "grounded": True,
+    out = _parse_answer(json.dumps({"reply": " Niko njiani ", "grounded": True,
                                     "needs_owner": False, "why": "just a greeting"}))
-    assert out == {"reply": "اه ماشي", "grounded": True, "needs_owner": False,
+    assert out == {"reply": "Niko njiani", "grounded": True, "needs_owner": False,
                    "why": "just a greeting", "quote": False}
 
 

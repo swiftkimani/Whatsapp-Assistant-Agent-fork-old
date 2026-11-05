@@ -9,9 +9,9 @@ from app.llm import _normalize_history, chat_completion
 
 def test_history_must_start_with_the_contacts_turn():
     out = _normalize_history([
-        {"role": "assistant", "content": "تمام"},      # window began on our reply
-        {"role": "user", "content": "انتي فين"},
-        {"role": "assistant", "content": "في الكلية"},
+        {"role": "assistant", "content": "sawa"},      # window began on our reply
+        {"role": "user", "content": "uko wapi"},
+        {"role": "assistant", "content": "niko campus"},
     ])
     assert [m["role"] for m in out] == ["user", "assistant"]
 

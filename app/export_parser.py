@@ -12,7 +12,7 @@ _ANDROID = re.compile(
 # ("Missed voice call", "security code changed"), never a continuation
 _STAMP = re.compile(r"^\u200e?(\[|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s+\d{1,2}:\d{2})")
 _SKIP = ("omitted", "<media", "<attached", "(file attached)", "deleted", "http://", "https://")
-_DIGITS = re.compile(r"[0-9\u0660-\u0669]")
+_DIGITS = re.compile(r"[0-9]")
 
 
 def parse_messages(text: str) -> list[tuple[str, str]]:

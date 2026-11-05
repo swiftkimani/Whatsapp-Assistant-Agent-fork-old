@@ -31,10 +31,6 @@ def test_long_replies_are_cut_at_a_word_boundary():
     assert 0 < len(out) <= MAX_SPEECH_CHARS and out.endswith("neno")
 
 
-def test_tatweel_is_removed():
-    assert clean_for_speech("جاري الارسال لـMom") == "جاري الارسال لMom"
-
-
 def test_provider_defaults_to_the_free_voice(monkeypatch):
     from app.tts import provider
     monkeypatch.delenv("TTS_PROVIDER", raising=False)

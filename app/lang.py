@@ -1,9 +1,9 @@
 """Which of the two languages a piece of text is in.
 
 Whisper may guess any of ~99 languages for a short clip; this system only needs
-English or Kiswahili. Unlike Arabic and English, those two share the Latin
-script, so text that did not come from Whisper cannot be told apart by
-characters and is judged by vocabulary instead.
+English or Kiswahili. The two share the Latin script, so unlike a pair written
+in different alphabets they cannot be told apart by characters at all: text
+that did not come from Whisper is judged by vocabulary instead.
 """
 import re
 

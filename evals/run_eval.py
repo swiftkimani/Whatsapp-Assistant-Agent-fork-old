@@ -28,7 +28,6 @@ sys.path.insert(0, str(ROOT))
 from app.llm import chat_completion, clean_reply   # noqa: E402
 
 LOCAL_TZ = ZoneInfo(os.getenv("TZ", "Africa/Nairobi"))
-PUNCTUATION = re.compile(r"[.,،!;:]")  # the persona forbids these
 
 
 def run_case(case: dict) -> dict:
