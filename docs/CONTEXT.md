@@ -1,27 +1,92 @@
 # CONTEXT — WhatsApp Assistant Agent
-_Last updated: 2026-11-04_
+_Last updated: 2026-11-05_
 
 ## Current goal
-Get the system running on this machine, with replies coming from the Claude API
-instead of OpenAI.
+Make the replies read like the owner wrote them, and make the dashboard
+workable from a phone. Both came from him reading a real transcript of his own
+assistant and saying "the ai is still not smart".
 
 ## Status at a glance
 | Area | State | Notes |
 |---|---|---|
-| Python env | ✅ | 3.12.16 in `venv/`; `torch==2.4.1` has no wheels past 3.12 |
+| Python env | ✅ | 3.12.16 in `venv/`; **torch is gone**, so 3.13 is only a dependency check away |
 | Bridge deps | ✅ | installed with `PUPPETEER_SKIP_DOWNLOAD=true`, uses system Chrome |
 | Claude port | ✅ | `llm.py`, `assistant.py`, `tts.py` |
 | Backend boots | ✅ | `/health` 200, `/dashboard` 200, auth gates 401 |
-| Test suite | ✅ | 242 pytest + 93 `node --test` pass, 0 fail |
+| Test suite | ✅ | **485 pytest + 201 `node --test`** pass, 0 fail (2026-11-05) |
 | Dashboard UI | ✅ | chrome moved into a profile sheet; phone-app layout on mobile (`ab3dfb1`, **not yet deployed**) |
 | Live model call | ✅ | real key in `.env`; replies, Arianna's tools and the blank-input guard all verified live |
 | Eval set run | ✅ | 27/32, **0 unsafe sends**; the 5 misses are the empty notes, see below |
 | Deploy (Coolify) | ✅ | live at https://arie.benardkimani.co.ke/dashboard, Let's Encrypt |
 | WhatsApp linked | ❌ | server unlinked and **cannot link itself**; the valid session is on the laptop (2026-11-03) |
 | Who gets answered | ✅ | `ALLOWED_CONTACTS=anyone` live on the server; unchosen senders reply automatically |
-| Replies going out | ⬜ | **the notes are still empty — this is the one blocker** |
+| Replies going out | ⬜ | `data/kb/about_me.md` is **still empty**, so she can state no fact about him |
+| Voice examples | ⬜ | `data/style_examples.md` is **still the shipped demo lines**; `POST /api/style/learn` replaces them from his own history and he has not run it |
+| Groups | 🟡 | policy built, stored per group and wired; needs `ALLOW_GROUPS=true` and a group chosen |
+| Auto-deploy | ❌ | the GitHub repo was renamed to `…-fork-old`, so Coolify discards every webhook — **his call to fix** |
 
 ## Done
+- **2026-11-05 — replies are written properly, and she knows her own name.**
+  He pasted a transcript: "im good thanks!! how about you" and, asked "arie or
+  kim?", an answer to a different message entirely. Three separate causes.
+  - `clean_reply()` **stripped every full stop, semicolon and colon** from
+    every reply while the prompt said "Lowercase is normal and fine" — code
+    and instruction agreeing on the wrong thing. Nothing is stripped now;
+    sentence starts and the pronoun `I` are repaired deterministically rather
+    than left to the model, and all eighteen worked examples in the prompt
+    were rewritten, because examples are copied far more reliably than prose
+    is followed. `6:30` keeps its colon; a domain keeps its dot.
+  - There was **no identity rule in the prompt at all**. Being asked who you
+    are is now a complete answer ("Ni Arianna"), in the language it was asked
+    in, and never a denial.
+  - The live question went unanswered because the bridge fired **one webhook
+    per message**. Two arrived in the same minute, so two agent runs read the
+    same history and raced; one reply went out, for the older message. A
+    per-chat buffer now answers a burst as one turn and quotes its last
+    message. That is also a ban property, not only a correctness one: three
+    sends inside a second is what automation looks like from the outside.
+- **2026-11-05 — torch deleted; the model sees photos itself.**
+  BLIP produced an English caption and the model reacted to *that sentence*,
+  in a system whose point is answering in Kiswahili and Sheng. Photos are
+  downscaled and sent as images now. `torch` and `transformers` were in
+  `requirements.txt` for that one feature; faster-whisper runs on ctranslate2
+  and never needed them. The cost was per photo, not at boot — the import was
+  already lazy — so the first photo took the process from 135 to 252 MiB
+  *before* loading a weight, then held ~1 GB of fp32 weights for fifteen
+  minutes. The backend's ceiling therefore drops **3 GiB → 1.5 GiB**, which
+  is the number that matters while the host sits in swap.
+- **2026-11-05 — groups read, and answer only where chosen.**
+  `ALLOW_GROUPS=true` used to mean an automatic reply to every message in
+  every group. It stays as the coarse gate (off, the bridge forwards nothing),
+  and each group now carries its own two settings in `group_modes`: when she
+  may answer at all, and whether the answer goes out by itself. Both default
+  to silence. Being addressed means an @mention, her name as a whole word, or
+  a reply to one of her messages; a mention arrives as `@c.us` or `@lid` and
+  those cannot be compared as numbers, so both forms of her id are held. Three
+  replies an hour per group, five minutes apart, stacking on the account-wide
+  pace. A group transcript names each speaker — without it the model reads a
+  room as one voice.
+- **2026-11-05 — the Held queue is workable.** Duplicate drafts from one burst
+  collapse to one card that says how many rows it stands for, resolved
+  server-side after a successful send so exactly one message ever goes out.
+  "Unknown" became the address book, then the name the sender chose, then the
+  number. The whole incoming message no longer goes into the card.
+- **2026-11-05 — the AI setting can be applied to many contacts at once**
+  (`POST /api/contacts/modes`), and names that match nobody are reported
+  rather than written.
+- **2026-11-05 — stickers send, and emoji stopped being mangled.** Previews
+  were cut by UTF-16 code unit, so a message ending in a family emoji produced
+  half a surrogate pair and a replacement character after any UTF-8 round
+  trip. Both sides had this bug; both are grapheme-safe now.
+- **2026-11-05 — two config bugs found by reading, not by failing.**
+  `ANTHROPIC_EFFORT` defaulted to `medium` with `ANTHROPIC_MAX_TOKENS=4096`
+  while `app/llm.py` is written for high/8192. Thinking tokens come out of
+  `max_tokens`, so raising effort alone returns a thinking block and no text,
+  which `_parse_answer` reads as malformed and `verify()` holds — a silent
+  failure that looks like the model choosing to hold. And **no bridge-API send
+  was paced**: `/send-reply`, `/send-text`, `/send-self`, `/forward` and
+  `/send-location` spent none of the account's budget. The queue is handed
+  over now.
 - **2026-11-04 — the dashboard's permanent chrome moved into a profile sheet.**
   On a 712px-tall screen the top bar, the list title row and two rows of
   wrapped filter pills took about forty percent of the height before a single
