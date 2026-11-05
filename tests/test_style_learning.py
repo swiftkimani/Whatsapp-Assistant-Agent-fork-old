@@ -155,7 +155,40 @@ def test_learning_stores_pairs_for_retrieval_with_the_time_it_ran(style_files, m
     assert stored["learned_at"] == CLOCK
     assert stored["pairs"] == [{"incoming": "umefika", "reply": "bado niko njiani"}]
     assert style_learning.style_status() == {
-        "is_placeholder": False, "lines": 1, "pairs": 1, "learned_at": CLOCK}
+        "is_placeholder": False, "lines": 1, "pairs": 1, "corrections": 0, "learned_at": CLOCK}
+
+
+def test_the_status_counts_his_own_corrections_apart_from_the_walks_pairs(style_files, monkeypatch):
+    """The number that says whether she is getting better rather than only set
+    up. Without it, one count of pairs cannot tell a learn run he ran once from
+    an assistant that has been improving every time he fixed a draft."""
+    fake_bridge(monkeypatch,
+                [chat("254700000001@c.us")],
+                {"254700000001@c.us": [message("umefika"), message("bado niko njiani", from_me=True)]})
+    asyncio.run(style_learning.learn_style(now=CLOCK))
+
+    assert style_learning.style_status()["pairs"] == 1
+    assert style_learning.style_status()["corrections"] == 0
+
+    style_learning.learn_from_edit("umefika ama bado uko job", "I am still at work.", "bado niko job manze")
+
+    status = style_learning.style_status()
+    assert status["pairs"] == 2 and status["corrections"] == 1
+    # A correction does not rewrite the style file, so neither the line count
+    # nor the date the voice was learned may move with it.
+    assert status["lines"] == 1 and status["learned_at"] == CLOCK
+
+
+def test_the_status_reads_a_pairs_file_holding_only_corrections(style_files):
+    """The ordinary state for an owner who has never pressed Learn: pairs, and
+    no walk behind them. Read as one field, that reported no pairs at all."""
+    style_learning.PAIRS_FILE.write_text(
+        json.dumps({"learned_at": None,
+                    "pairs": [{"incoming": "umefika", "reply": "niko hapa", "source": "correction"}]}),
+        encoding="utf-8")
+
+    status = style_learning.style_status()
+    assert status["pairs"] == 1 and status["corrections"] == 1 and status["learned_at"] is None
 
 
 def test_the_shipped_placeholders_are_reported_as_not_filled_in_yet(style_files):

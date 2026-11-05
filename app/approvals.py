@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app import contacts, db
+from app import contacts, db, style_learning
 from app.controls import readable_who
 from app.log import log_event
 from app.dashboard import require_auth
@@ -243,6 +243,10 @@ def send_held(item_id: int, body: SendRequest):
     if not item:
         raise HTTPException(404, "No such item.")
     text = (body.text if body.text is not None else item["reply"]).strip()
+    # Whether he rewrote it. Recorded here because this is the only moment
+    # both texts exist together, and it is what the quality report needs to
+    # tell "she got it right" apart from "he fixed it before it went out".
+    edited = text != (item["reply"] or "").strip()
     if not text:
         raise HTTPException(400, "The reply is empty.")
     if not db.transition(item_id, "pending", "sending"):
@@ -280,6 +284,8 @@ def send_held(item_id: int, body: SendRequest):
         raise HTTPException(502, "Couldn't send through the bridge. Is it running?")
 
     db.transition(item_id, "sending", "sent")
+    if edited:
+        db.mark_edited(item_id)
     # One answer, one WhatsApp message: the rows this card stood for are
     # dismissed, never sent. Only now the send has succeeded — a failure above
     # puts this row back and leaves them waiting with it.
@@ -288,6 +294,17 @@ def send_held(item_id: int, body: SendRequest):
     db.log_message(item["chat_id"], contacts.name_for(item["chat_id"], item.get("number")), "out", text, "held_sent")
     log_event("held_sent", duplicates=also_dismissed)
     add_assistant_message(item["chat_id"], text)  # keep the conversation memory coherent
+
+    # The reply has gone. What is left of this exchange is the best material in
+    # the system: where `text` differs from the draft in `item["reply"]`, the
+    # difference is the owner's own words for this situation and this person,
+    # written at the moment he cared enough to fix what she wrote. It is kept
+    # as a style pair so the next reply is drawn from it.
+    #
+    # Last in the handler, and silent about its own failures, because learning
+    # from a correction is a nicety and the reply is not — the same bargain
+    # app.main._copy_to_owner makes for its own best-effort work.
+    style_learning.learn_from_edit(item["incoming"] or "", item["reply"] or "", text)
     return {"status": "sent", "duplicates_dismissed": also_dismissed}
 
 
@@ -297,6 +314,17 @@ def dismiss_held(item_id: int):
 
     The status change goes first, so a draft that no longer exists still reads
     as already handled rather than as a different error.
+
+    Nothing is learned here, unlike send_held. A dismissal is a signal, but not
+    one either reader of the style files can use: data/style_examples.md is
+    "messages you actually sent" and app.style_retrieval hands the model pairs
+    as examples of how the owner replies, so both are positive-only, and a
+    dismissed draft contains no words of his at all — only the model's, which
+    he rejected. Putting it in either place would show the model the sentence it
+    was meant to stop writing. It is also ambiguous: he may be rejecting the
+    words, or rejecting the idea of replying at all, and the row does not say
+    which. A real negative channel would need its own prompt section and its own
+    file, so it is not built rather than built uselessly.
     """
     if not db.transition(item_id, "pending", "dismissed"):
         raise HTTPException(409, "Already handled.")

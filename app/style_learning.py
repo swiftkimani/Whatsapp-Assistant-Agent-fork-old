@@ -7,6 +7,12 @@ has been imitating a demo fixture. This module reads the owner's own recent
 conversations through the bridge, turns them into (their message -> your reply)
 pairs, and rewrites both that file and the pairs file app.style_retrieval reads.
 
+That walk only happens when the owner asks for it. learn_from_edit() is the
+other way in, and it needs nothing asked of him: when he rewrites a held draft
+before approving it, what he sent is kept as a pair too — his own words, for
+that situation, for that person, at the moment he cared enough to fix it. See
+app.approvals.send_held.
+
 Privacy: this reads the owner's own account on the owner's own server, which is
 the premise of the whole project — but a pair contains words somebody else
 wrote. So nothing is kept beyond what the prompt and the retrieval actually
@@ -14,8 +20,10 @@ use, the ceilings below bound how much is ever held at once, and no message
 text, name or number reaches a log line. Counts, flags and a hashed chat id
 only, which is the rule app.log sets out.
 """
+import difflib
 import json
 import os
+import threading
 import time
 from datetime import datetime
 from itertools import zip_longest
@@ -270,13 +278,172 @@ def _write_examples(lines: list[str], now: float) -> Path | None:
     return backup
 
 
-def _stored_pairs() -> tuple[int, float | None]:
-    """How many pairs are stored for retrieval, and when they were learned."""
+def _read_pairs() -> tuple[list[dict], float | None]:
+    """The pairs stored for retrieval, and when the walk last rewrote the voice.
+
+    The two are read apart rather than together: a correction appends a pair
+    without claiming the style file was rewritten, so a file can hold pairs and
+    carry no learned_at at all, and reading them as one would have reported
+    "nothing learned" for a file full of the owner's own corrections.
+
+    Anything unreadable — not written yet, half written, not ours — is no
+    pairs, never an exception. The same bargain app.style_retrieval makes: the
+    voice is a bonus on a reply, not a precondition for one.
+    """
     try:
         stored = json.loads(PAIRS_FILE.read_text(encoding="utf-8"))
-        return len(stored["pairs"]), float(stored["learned_at"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return 0, None      # never learned, or the file is not ours to read
+        pairs = [p for p in (stored.get("pairs") or []) if isinstance(p, dict)]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return [], None
+    try:
+        return pairs, float(stored["learned_at"])
+    except (KeyError, TypeError, ValueError):
+        return pairs, None
+
+
+# --------------------------------- learning from the owner's own corrections ----
+
+# What marks a pair as the owner's own correction rather than something read
+# off his history. Pairs from the walk carry no source at all, which is also
+# what every pair written before this existed looks like.
+CORRECTION = "correction"
+
+# How alike the draft and what he actually sent may be before the difference
+# stops being a correction worth keeping. difflib's ratio is the share of
+# characters the two have in common, so this is a share rather than a count:
+# nine characters changed in a sixty-character reply is a different sentence,
+# and the same nine in a four-hundred-character one is a typo fixed. At 0.85 a
+# dropped comma, a fixed capital and a corrected spelling all stay out, while
+# swapping a word for another one — the smallest thing that is actually a
+# choice of his — comes through.
+EDIT_SIMILARITY_CEILING = 0.85
+
+# This file is read on every single message, so corrections cannot be allowed
+# to grow with the number of drafts he has ever approved. Two hundred is the
+# same order as the couple of hundred pairs the walk itself produces, so the
+# two together are what the retrieval was already sized for: tens of kilobytes,
+# re-read only when the file changes, scored in microseconds. It is also more
+# corrections than months of use will reach.
+MAX_CORRECTIONS = 200
+
+# Two approvals in the dashboard land as two threads of one process, and the
+# append below is a read-modify-write: without this one of the two pairs is
+# simply lost, and both threads name their temp file after the same process id,
+# so they would also write over each other's half-finished file and rename the
+# result into place. One lock covers reading, deciding and writing.
+_WRITE_LOCK = threading.Lock()
+
+
+def _shape(text: str) -> str:
+    """What makes two messages the same words: spacing and case do not count."""
+    return " ".join((text or "").split()).casefold()
+
+
+def is_an_edit(draft: str, sent: str) -> bool:
+    """Did the owner rewrite this draft, or only press send on it?
+
+    Three cases, and only the last is worth keeping:
+
+      - the same words, however they are spaced or capitalised. Nothing was
+        corrected; this is the draft, approved.
+      - a nudge: a typo, a dropped comma, a capital letter. The words are still
+        the model's own, so there is no choice of his in it to learn from, and
+        keeping it would spend a slot in the retrieval handing the model its
+        own output back.
+      - a real change, up to a complete rewrite, which is the valuable case and
+        scores lowest of all.
+
+    autojunk is off: it starts treating common characters as noise at 200
+    elements, which would quietly change how a long draft scores against a
+    short rewrite of it — the very case this most wants to catch.
+    """
+    draft, sent = _shape(draft), _shape(sent)
+    if not sent or draft == sent:
+        return False
+    return difflib.SequenceMatcher(None, draft, sent, autojunk=False).ratio() < EDIT_SIMILARITY_CEILING
+
+
+def correction_pair(incoming: str, draft: str, sent: str) -> dict | None:
+    """The pair to keep from one approved send, or None when there is none.
+
+    build_pairs is the filter, rather than a second set of rules written out
+    here: it is what the learn walk and a pasted export both already go
+    through, and it is where the judgement calls live — a link or a media
+    placeholder on either side is not text to learn from, a reply over 120
+    characters or an incoming over 300 is not a texting example, and a reply
+    with a digit in it is dropped because a time or a price copied back out as
+    fact goes stale. An edit has to be dropped by those same rules, or the
+    pairs he corrected himself would be the only ones in the file that nobody
+    filtered.
+    """
+    incoming, sent = (incoming or "").strip(), (sent or "").strip()
+    if not incoming or not is_an_edit(draft, sent):
+        return None
+    pairs = build_pairs([(_THEM, incoming), (_OWNER, sent)], owner=_OWNER)
+    return {**pairs[0], "source": CORRECTION} if pairs else None
+
+
+def keep_newest_distinct(corrections: list[dict], limit: int) -> list[dict]:
+    """The corrections to keep, oldest first, within the cap.
+
+    Newest first, because the voice he has now is the one to imitate. Most
+    distinct, because the retrieval hands the model up to five of these at once
+    and five slots filled with one sentence teach one sentence: two corrections
+    whose reply is the same words, however spaced or capitalised, are one
+    correction, and the newer wins. Dropping the oldest is what is left over
+    once that has been done rather than the rule itself, so a cap reached by
+    repeating himself costs him none of the distinct things he has said.
+    """
+    kept, seen = [], set()
+    for pair in reversed(corrections):
+        shape = _shape(pair.get("reply"))
+        if not shape or shape in seen:
+            continue
+        seen.add(shape)
+        kept.append(pair)
+        if len(kept) == limit:
+            break
+    kept.reverse()      # back to oldest first, so the next append is still newest-last
+    return kept
+
+
+def learn_from_edit(incoming: str, draft: str, sent: str) -> bool:
+    """Keep what the owner actually sent as a style pair, if he changed the draft.
+
+    Called once a held reply has already gone out, so nothing here may cost him
+    that reply: every failure is logged and swallowed, the same bargain
+    app.main._copy_to_owner makes for its own best-effort work. The return
+    value says whether a pair was stored, which is what the tests read; no
+    caller needs it.
+
+    Only the pairs file is written. data/style_examples.md is a whole-file
+    rewrite with a date header and a rule about backing up anything he typed
+    himself, and appending to it on every send would churn both — the pair
+    reaches the prompt through app.style_retrieval instead, from the very next
+    message, because that module re-reads this file whenever it changes.
+    """
+    try:
+        pair = correction_pair(incoming, draft, sent)
+        if pair is None:
+            return False
+        with _WRITE_LOCK:
+            stored, learned_at = _read_pairs()
+            walked = [p for p in stored if p.get("source") != CORRECTION]
+            corrections = keep_newest_distinct(
+                [p for p in stored if p.get("source") == CORRECTION] + [pair], MAX_CORRECTIONS)
+            # learned_at is carried through untouched: it is when the walk last
+            # rewrote his voice, and the dashboard prints it beside the number
+            # of lines in the style file, which a correction does not touch.
+            _write_atomically(PAIRS_FILE, json.dumps(
+                {"learned_at": learned_at, "pairs": walked + corrections}, ensure_ascii=False) + "\n")
+        log_event("style_correction_learned", corrections=len(corrections))      # counts only, never text
+        return True
+    except Exception as err:
+        # Said out loud, because corrections silently not being kept is the
+        # whole feature quietly not happening — but the class only, because the
+        # thing that failed to be written is a message somebody else wrote.
+        log_event("style_correction_failed", level="warning", error=type(err).__name__)
+        return False
 
 
 # ----------------------------------------------------------- the two jobs ----
@@ -327,7 +494,22 @@ async def learn_style(
             "Try again asking for more messages per chat.", 422)
 
     lines = pick_examples(per_chat, MAX_EXAMPLES)
-    _write_atomically(PAIRS_FILE, json.dumps({"learned_at": now, "pairs": pairs}, ensure_ascii=False) + "\n")
+    # Read and written under the one lock, so an approval landing mid-walk is
+    # either in this file or in the next write, never lost between the two. The
+    # section is a small read and a rename; it blocks the loop for no longer
+    # than the stat() every message already pays.
+    with _WRITE_LOCK:
+        # A pair he corrected himself outranks anything this walk can find, and
+        # the walk cannot find it: the draft he rewrote was never a message in
+        # his history. So corrections survive the rewrite, and a walked pair
+        # saying the same thing gives way to his own marked copy rather than
+        # shadowing it and dropping the count the status reports back to him.
+        his = keep_newest_distinct(
+            [p for p in _read_pairs()[0] if p.get("source") == CORRECTION], MAX_CORRECTIONS)
+        mine = {(p.get("incoming"), p.get("reply")) for p in his}
+        kept = [p for p in pairs if (p["incoming"], p["reply"]) not in mine] + his
+        _write_atomically(PAIRS_FILE, json.dumps({"learned_at": now, "pairs": kept}, ensure_ascii=False) + "\n")
+    pairs = kept
     backup = _write_examples(lines, now)
     log_event("style_learned", chats_read=chats_read, pairs=len(pairs),
               lines=len(lines), backed_up=bool(backup))    # counts only, never text
@@ -337,11 +519,16 @@ async def learn_style(
 
 def style_status() -> dict:
     text = _read_text(llm.STYLE_EXAMPLES_PATH)
-    pairs, learned_at = _stored_pairs()
+    pairs, learned_at = _read_pairs()
     return {
         "is_placeholder": is_placeholder(text),
         "lines": len(parse_lines(text)),
-        "pairs": pairs,
+        "pairs": len(pairs),
+        # Counted apart from the rest, because it is the one number that says
+        # whether the assistant is getting better rather than only set up: a
+        # pair here exists because he rewrote a draft, not because something
+        # walked his history.
+        "corrections": sum(1 for p in pairs if p.get("source") == CORRECTION),
         "learned_at": learned_at,
     }
 

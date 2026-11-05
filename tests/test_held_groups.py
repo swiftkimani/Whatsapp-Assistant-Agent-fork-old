@@ -363,3 +363,27 @@ def test_an_approved_group_draft_is_allowed_through(signed_in, fresh_db, bridge)
     item = fresh_db.add_held("254712345678-1600000000@g.us", "Tuko wapi?", "Niko njiani.")
     assert signed_in.post(f"/api/held/{item}/send", json={}).status_code == 200
     assert bridge[0]["allow_group"] is True
+
+
+# ---- was the draft good enough to send as written? ----
+# The one number that says whether she is working. Sending untouched and
+# rewriting first both end as "sent", and only this tells them apart.
+
+def test_a_draft_sent_as_written_is_not_marked_edited(signed_in, fresh_db, bridge):
+    item = fresh_db.add_held(LANDLORD, "Na ile invoice?", "Nitatuma leo jioni.")
+    signed_in.post(f"/api/held/{item}/send", json={})
+    assert fresh_db.get(item)["was_edited"] == 0
+
+
+def test_a_draft_rewritten_before_sending_is_marked_edited(signed_in, fresh_db, bridge):
+    item = fresh_db.add_held(LANDLORD, "Na ile invoice?", "Nitatuma leo jioni.")
+    signed_in.post(f"/api/held/{item}/send", json={"text": "Nitatuma kesho asubuhi."})
+    assert fresh_db.get(item)["was_edited"] == 1
+
+
+def test_resending_the_same_words_with_different_spacing_is_not_an_edit(signed_in, fresh_db, bridge):
+    """The textarea round-trips whitespace, and a trailing newline is not the
+    owner disagreeing with her."""
+    item = fresh_db.add_held(LANDLORD, "Na ile invoice?", "Nitatuma leo jioni.")
+    signed_in.post(f"/api/held/{item}/send", json={"text": "  Nitatuma leo jioni.  "})
+    assert fresh_db.get(item)["was_edited"] == 0
